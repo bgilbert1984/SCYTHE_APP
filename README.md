@@ -1,6 +1,7 @@
 # SCYTHE EVE: Mobile Grounding, RF->IP Correlation, and the First Projection-Ready Digital Twin
 
 Ben Gilbert | Texas City | April 20, 2026
+https://172-234-197-23.ip.linodeusercontent.com/?page_id=14
 💥 VLS TUBE LANCEERING GESLAAGD! 🛰️⚡🔥
 <img width="500" height="280" alt="image" src="https://github.com/user-attachments/assets/0e88c1be-0d34-4f05-bcf3-67aeb6799da5" />
 
@@ -311,3 +312,5 @@ SCYTHE now has the beginnings of a full cyber-physical attribution loop:
 The next step is not inventing a new architecture.
 
 It is finishing the last meter between the projected truth we now have and the AR scene that can render it in the field.
+
+
