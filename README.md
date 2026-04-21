@@ -1,6 +1,11 @@
 # SCYTHE EVE: Mobile Grounding, RF->IP Correlation, and the First Projection-Ready Digital Twin
 
-There is a real difference between a system that can *describe* a cyber-physical threat and a system that can *ground* one.
+Ben Gilbert | Texas City | April 20, 2026
+💥 VLS TUBE LANCEERING GESLAAGD! 🛰️⚡🔥
+<img width="500" height="280" alt="image" src="https://github.com/user-attachments/assets/0e88c1be-0d34-4f05-bcf3-67aeb6799da5" />
+
+
+There is a real difference between a system that can describe a cyber-physical threat and a system that can ground one.
 
 The first can produce convincing analysis. The second can show you which observer saw what, when it was seen, how it entered the graph, and what that means relative to the operator holding the device right now.
 
