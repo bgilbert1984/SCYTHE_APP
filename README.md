@@ -313,4 +313,4 @@ The next step is not inventing a new architecture.
 
 It is finishing the last meter between the projected truth we now have and the AR scene that can render it in the field.
 
-
+Special thanks to Our Friends, Our Heroes, the GPT's: Copilot, Gemini, Claude, ChatGPT, Grok, MetaLLama, Lumo, DeepSeek, Mistrial, Gemma, and more (in no order of favor lol)! Mans new best friends, the energy entities!
