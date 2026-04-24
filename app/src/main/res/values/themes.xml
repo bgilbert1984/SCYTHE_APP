@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ScytheCommand" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/scythe_bg</item>
+        <item name="colorPrimaryVariant">@color/scythe_surface</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSurface">@color/scythe_surface</item>
+        <item name="android:windowBackground">@color/scythe_bg</item>
+        <item name="android:statusBarColor">@color/scythe_bg</item>
+        <item name="android:navigationBarColor">@color/scythe_bg</item>
+    </style>
+</resources>

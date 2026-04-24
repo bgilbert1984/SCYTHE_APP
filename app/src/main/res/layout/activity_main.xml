@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/scythe_bg">
+
+    <!-- Minimal top bar: status indicator + settings icon -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:background="@color/scythe_surface"
+        android:paddingStart="12dp"
+        android:paddingEnd="8dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/connecting"
+            android:textColor="@color/scythe_accent"
+            android:textSize="12sp"
+            android:fontFamily="monospace"/>
+
+        <Button
+            android:id="@+id/btnTwin"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginEnd="6dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:text="@string/twin"
+            android:textAllCaps="true"
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:textColor="@color/scythe_bg"
+            android:backgroundTint="@color/status_connected" />
+
+        <Button
+            android:id="@+id/btnDemo"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginEnd="6dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:text="@string/demo"
+            android:textAllCaps="true"
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:textColor="@color/scythe_bg"
+            android:backgroundTint="@color/scythe_accent" />
+
+        <ImageButton
+            android:id="@+id/btnReload"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_menu_rotate"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="@color/scythe_accent"
+            android:contentDescription="@string/reload"/>
+
+        <ImageButton
+            android:id="@+id/btnSettings"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_menu_preferences"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="@color/scythe_accent"
+            android:contentDescription="@string/settings"/>
+    </LinearLayout>
+
+    <!-- Loading overlay -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/webView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+
+        <LinearLayout
+            android:id="@+id/loadingOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@color/scythe_bg">
+
+            <ProgressBar
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:indeterminateTint="@color/scythe_accent"/>
+
+            <TextView
+                android:id="@+id/tvLoadingMsg"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Connecting to Scythe…"
+                android:textColor="@color/scythe_accent"
+                android:textSize="14sp"
+                android:fontFamily="monospace"/>
+
+            <Button
+                android:id="@+id/btnOpenSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="Configure Server"
+                android:textColor="@color/scythe_bg"
+                android:backgroundTint="@color/scythe_accent"/>
+
+            <Button
+                android:id="@+id/btnDigitalTwin"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/open_digital_twin"
+                android:textColor="@color/scythe_bg"
+                android:backgroundTint="@color/status_connected"/>
+
+            <Button
+                android:id="@+id/btnOfflineDemo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/open_offline_demo"
+                android:textColor="@color/scythe_accent"
+                android:backgroundTint="@color/scythe_surface"/>
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- Sensor status strip -->
+    <LinearLayout
+        android:id="@+id/sensorBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/scythe_surface"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvSensorStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/sensor_active"
+                android:textSize="10sp"
+                android:fontFamily="monospace"
+                android:singleLine="true"/>
+
+            <TextView
+                android:id="@+id/tvSensorMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="@color/scythe_accent"
+                android:textSize="9sp"
+                android:fontFamily="monospace"
+                android:maxLines="2"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvSensorStop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="■ stop"
+            android:textColor="@color/status_disconnected"
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:paddingStart="12dp"
+            android:paddingEnd="4dp"/>
+
+    </LinearLayout>
+
+</LinearLayout>

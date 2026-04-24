@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCYTHE Hybrid Digital Twin</title>
+  <style>
+    :root {
+      --bg: #07111c;
+      --surface: #101d2d;
+      --surface-2: #16273d;
+      --accent: #3ad7ff;
+      --accent-2: #7cf29c;
+      --forecast: #c084fc;
+      --warn: #ffd166;
+      --danger: #ff6b6b;
+      --text: #dbe8ff;
+      --muted: #86a0bf;
+      --line: rgba(255, 255, 255, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top, rgba(58, 215, 255, 0.14), transparent 28%),
+        linear-gradient(180deg, #0a1624, var(--bg));
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .wrap {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+    .hero, .panel, .stat {
+      background: rgba(9, 18, 31, 0.88);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 16px 44px rgba(0, 0, 0, 0.24);
+    }
+    .hero, .panel {
+      padding: 16px;
+    }
+    .eyebrow {
+      color: var(--accent);
+      font: 600 12px/1 monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 10px 0 8px;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    p.sub {
+      margin: 0;
+      color: var(--muted);
+    }
+    .toolbar, .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font: 600 12px/1 monospace;
+      background: var(--surface-2);
+      color: var(--text);
+    }
+    button.primary { background: var(--accent); color: #06131c; }
+    button.success { background: var(--accent-2); color: #08150d; }
+    button.ghost { border: 1px solid var(--line); background: transparent; }
+    .chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      font: 600 11px/1 monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .chip.ok { color: var(--accent-2); background: rgba(124, 242, 156, 0.12); }
+    .chip.warn { color: var(--warn); background: rgba(255, 209, 102, 0.12); }
+    .chip.bad { color: var(--danger); background: rgba(255, 107, 107, 0.12); }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+    }
+    .stat {
+      padding: 12px;
+    }
+    .k {
+      color: var(--muted);
+      font: 600 11px/1 monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .v {
+      margin-top: 6px;
+      font-size: 21px;
+      font-weight: 700;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 14px;
+    }
+    .radar {
+      height: 360px;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(circle at center, rgba(58, 215, 255, 0.12), transparent 35%),
+        linear-gradient(180deg, rgba(255,255,255,0.04), transparent);
+    }
+    svg { display: block; width: 100%; height: 100%; }
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 360px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .card {
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.05);
+      padding: 12px;
+    }
+    .card h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+    .meta, .footer {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: monospace;
+      white-space: pre-line;
+    }
+    .lane {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      font: 600 11px/1 monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .lane.binding { background: rgba(58, 215, 255, 0.16); color: var(--accent); }
+    .lane.entity { background: rgba(124, 242, 156, 0.16); color: var(--accent-2); }
+    .lane.forecast { background: rgba(192, 132, 252, 0.16); color: var(--forecast); }
+    .section-title {
+      margin: 6px 0 2px;
+      color: var(--muted);
+      font: 600 11px/1 monospace;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .empty {
+      display: grid;
+      place-items: center;
+      min-height: 240px;
+      color: var(--muted);
+      text-align: center;
+      padding: 20px;
+    }
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: 1fr; }
+      .radar, .list { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">SCYTHE :: Hybrid Digital Twin</div>
+      <h1>Observer-relative projection feed for phone -> graph -> AR</h1>
+      <p class="sub">
+        This is the projection-first layer from the Cesium + ARCore hybrid spec: the graph stays global,
+        and the device consumes only entities projected relative to the current observer.
+      </p>
+      <div class="toolbar">
+        <button class="primary" id="btnRefresh">Refresh Projection</button>
+        <button class="success" id="btnSensor">Start Sensor</button>
+        <button class="ghost" id="btnSettings">Settings</button>
+        <button class="ghost" id="btnDemo">Offline Lane Demo</button>
+        <button class="ghost" id="btnReturn">Return Live Ops</button>
+      </div>
+      <div class="chips">
+        <div class="chip" id="chipObserver">Observer: resolving...</div>
+        <div class="chip" id="chipServer">Server: checking...</div>
+        <div class="chip" id="chipSensor">Sensor: unknown</div>
+        <div class="chip" id="chipMode">Mode: north-up projection</div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><div class="k">Projected entities</div><div class="v" id="statEntities">0</div></div>
+      <div class="stat"><div class="k">RF->IP bindings</div><div class="v" id="statBindings">0</div></div>
+      <div class="stat"><div class="k">Nearby recon</div><div class="v" id="statNearby">0</div></div>
+      <div class="stat"><div class="k">Forecast paths</div><div class="v" id="statForecasts">0</div></div>
+      <div class="stat"><div class="k">Closest target</div><div class="v" id="statClosest">-</div></div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2 style="margin-top:0">Projection radar</h2>
+        <div class="meta" id="observerMeta">Waiting for observer context...</div>
+        <div class="radar">
+          <svg viewBox="0 0 420 420" aria-label="digital twin projection radar">
+            <defs>
+              <radialGradient id="gRadar" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stop-color="rgba(58,215,255,0.12)" />
+                <stop offset="100%" stop-color="rgba(58,215,255,0.01)" />
+              </radialGradient>
+            </defs>
+            <rect width="420" height="420" fill="url(#gRadar)"></rect>
+            <g stroke="rgba(255,255,255,0.12)" fill="none">
+              <circle cx="210" cy="210" r="54"></circle>
+              <circle cx="210" cy="210" r="108"></circle>
+              <circle cx="210" cy="210" r="162"></circle>
+              <circle cx="210" cy="210" r="198"></circle>
+              <line x1="210" y1="12" x2="210" y2="408"></line>
+              <line x1="12" y1="210" x2="408" y2="210"></line>
+            </g>
+            <g fill="#86a0bf" font-family="monospace" font-size="12">
+              <text x="206" y="26">N</text>
+              <text x="392" y="214">E</text>
+              <text x="206" y="404">S</text>
+              <text x="20" y="214">W</text>
+            </g>
+            <g id="radarLayer"></g>
+            <g id="observerLayer">
+              <circle cx="210" cy="210" r="8" fill="#7cf29c"></circle>
+              <circle cx="210" cy="210" r="18" fill="none" stroke="rgba(124,242,156,0.24)"></circle>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-top:0">Projected targets</h2>
+        <div class="list" id="targetList"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 style="margin-top:0">Operator notes</h2>
+      <div class="footer" id="footerMeta">Waiting for projection feed...</div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      serverUrl: '',
+      relayUrl: '',
+      observerId: '',
+      appVersion: '',
+      timer: null,
+      payload: null,
+      fallbackCounter: 0
+    };
+
+    function hasBridge() {
+      return typeof window.ScytheBridge !== 'undefined';
+    }
+
+    function safeParse(raw) {
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        return { status: 'error', message: 'invalid_json', raw };
+      }
+    }
+
+    function getBridgeString(fn, fallback = '') {
+      try {
+        return hasBridge() && typeof ScytheBridge[fn] === 'function'
+          ? String(ScytheBridge[fn]())
+          : fallback;
+      } catch (err) {
+        return fallback;
+      }
+    }
+
+    function setChip(id, text, cls) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = 'chip' + (cls ? ' ' + cls : '');
+    }
+
+    function syntheticPayload() {
+      state.fallbackCounter += 1;
+      const now = Date.now() / 1000;
+      return {
+        status: 'ok',
+        observer: {
+          observer_id: state.observerId || 'android-demo',
+          label: 'ANDROID VIEWPOINT',
+          lat: 32.7767,
+          lon: -96.7970,
+          alt_m: 9,
+          heading_deg: 0,
+          source: 'local_demo'
+        },
+        counts: { bindings: 1, nearby_entities: 2, forecast_paths: 1, projectable_forecasts: 1 },
+        entities: [
+          {
+            entity_id: 'RE-DEMO-BIND',
+            label: 'RF->IP Bound UAS',
+            type: 'RF_IP_BOUND',
+            source: 'demo_binding',
+            confidence: 0.91,
+            distance_m: 380 + (state.fallbackCounter % 4) * 12,
+            absolute_bearing_deg: 38,
+            relative_bearing_deg: 38,
+            elevation_deg: 11,
+            location: { lat: 32.7791, lon: -96.7945, alt_m: 82 },
+            metadata: { binding_id: 'demo-binding', score_components: { time_alignment: 0.94 } }
+          },
+          {
+            entity_id: 'android-wingman',
+            label: 'Nearby Android Sensor',
+            type: 'RECON_ENTITY',
+            source: 'demo_recon',
+            confidence: 0.64,
+            distance_m: 145,
+            absolute_bearing_deg: 112,
+            relative_bearing_deg: 112,
+            elevation_deg: 1,
+            location: { lat: 32.7761, lon: -96.7954, alt_m: 10 },
+            metadata: { platform: 'android', source: 'demo' }
+          },
+          {
+            entity_id: 'wifi-cluster-7',
+            label: 'Observed WiFi Cluster',
+            type: 'RECON_ENTITY',
+            source: 'demo_recon',
+            confidence: 0.48,
+            distance_m: 620,
+            absolute_bearing_deg: 284,
+            relative_bearing_deg: -76,
+            elevation_deg: 0,
+            location: { lat: 32.7772, lon: -96.8032, alt_m: 9 },
+            metadata: { source: 'android_wifi_scan' }
+          }
+        ],
+        predictions: [
+          {
+            prediction_id: 'pred-ctrl-demo',
+            rf_prediction_id: 'pred-rfip-demo',
+            kind: 'CONTROL_PATH_PREDICTED',
+            current_entity_id: 'RE-DEMO-BIND',
+            current_label: 'RF->IP Bound UAS',
+            target_entity_id: 'relay-forecast',
+            target_label: 'Predicted Relay / C2 Hop',
+            sensor_node_id: 'sensor:android-demo',
+            rf_node_id: 'rf:demo-emitter',
+            source_binding_id: 'demo-binding',
+            confidence: 0.73,
+            time_horizon_s: 15,
+            candidate_source: 'identity_stitch+fanin_motif',
+            forecast: true,
+            obs_class: 'forecast',
+            render_style: { line: 'dashed', pulse: 'soft', ghost: true, opacity: 0.46 },
+            supporting_evidence: {
+              binding_confidence: 0.91,
+              identity_similarity: 0.69,
+              fanin_score: 0.55,
+              temporal_pressure: 0.41,
+              questdb_edge_rate_eps: 24.7,
+              questdb_dst_node: '40.104.2.130'
+            },
+            motion_forecast: {
+              seed_entity_id: 'RE-DEMO-BIND',
+              seed_label: 'RF->IP Bound UAS',
+              horizon_s: 15,
+              step_seconds: 5,
+              history_points: 3,
+              model: 'doma_blend',
+              rf_class: 'uav_controller',
+              confidence: 0.69,
+              path: [
+                { step: 1, time_offset_s: 5, confidence: 0.66, radius_m: 34, model: 'doma_blend', location: { lat: 32.7799, lon: -96.7937, alt_m: 92 } },
+                { step: 2, time_offset_s: 10, confidence: 0.61, radius_m: 48, model: 'doma_blend', location: { lat: 32.7807, lon: -96.7928, alt_m: 101 } },
+                { step: 3, time_offset_s: 15, confidence: 0.56, radius_m: 64, model: 'doma_blend', location: { lat: 32.7813, lon: -96.7916, alt_m: 109 } }
+              ]
+            },
+            seed_projection: {
+              entity_id: 'RE-DEMO-BIND',
+              label: 'RF->IP Bound UAS',
+              distance_m: 380,
+              absolute_bearing_deg: 38
+            },
+            projected_path: [
+              {
+                entity_id: 'RE-DEMO-BIND',
+                label: 'RF->IP Bound UAS',
+                type: 'CONTROL_PATH_MOTION_PREDICTED',
+                source: 'control_path_prediction',
+                confidence: 0.66,
+                distance_m: 452,
+                absolute_bearing_deg: 42,
+                relative_bearing_deg: 42,
+                elevation_deg: 12,
+                location: { lat: 32.7799, lon: -96.7937, alt_m: 92 },
+                metadata: { forecast: true, obs_class: 'forecast', step: 1, time_offset_s: 5, radius_m: 34, model: 'doma_blend' }
+              },
+              {
+                entity_id: 'RE-DEMO-BIND',
+                label: 'RF->IP Bound UAS',
+                type: 'CONTROL_PATH_MOTION_PREDICTED',
+                source: 'control_path_prediction',
+                confidence: 0.61,
+                distance_m: 535,
+                absolute_bearing_deg: 48,
+                relative_bearing_deg: 48,
+                elevation_deg: 14,
+                location: { lat: 32.7807, lon: -96.7928, alt_m: 101 },
+                metadata: { forecast: true, obs_class: 'forecast', step: 2, time_offset_s: 10, radius_m: 48, model: 'doma_blend' }
+              },
+              {
+                entity_id: 'RE-DEMO-BIND',
+                label: 'RF->IP Bound UAS',
+                type: 'CONTROL_PATH_MOTION_PREDICTED',
+                source: 'control_path_prediction',
+                confidence: 0.56,
+                distance_m: 626,
+                absolute_bearing_deg: 55,
+                relative_bearing_deg: 55,
+                elevation_deg: 15,
+                location: { lat: 32.7813, lon: -96.7916, alt_m: 109 },
+                metadata: { forecast: true, obs_class: 'forecast', step: 3, time_offset_s: 15, radius_m: 64, model: 'doma_blend' }
+              }
+            ],
+            projected_target: {
+              entity_id: 'relay-forecast',
+              label: 'Predicted Relay / C2 Hop',
+              type: 'CONTROL_PATH_PREDICTED',
+              source: 'control_path_prediction',
+              confidence: 0.73,
+              distance_m: 610,
+              absolute_bearing_deg: 58,
+              relative_bearing_deg: 58,
+              elevation_deg: 4,
+              location: { lat: 32.7806, lon: -96.7920, alt_m: 48 },
+              metadata: { forecast: true, obs_class: 'forecast' }
+            }
+          }
+        ],
+        signals: {
+          questdb_edge_rate_eps: 24.7,
+          questdb_fanin_events: 2,
+          questdb_recent_alerts: 1,
+          questdb_top_talkers: 3
+        },
+        timestamp: now
+      };
+    }
+
+    function loadProjection() {
+      let payload = null;
+      if (hasBridge() && typeof ScytheBridge.getDigitalTwinProjection === 'function') {
+        payload = safeParse(ScytheBridge.getDigitalTwinProjection());
+      }
+      if (!payload || payload.status !== 'ok') {
+        payload = syntheticPayload();
+        setChip('chipServer', 'Server: fallback demo', 'warn');
+      } else {
+        setChip('chipServer', 'Server: projection online', 'ok');
+      }
+      state.payload = payload;
+      render(payload);
+    }
+
+    function render(payload) {
+      const entities = Array.isArray(payload.entities) ? payload.entities : [];
+      const predictions = Array.isArray(payload.predictions) ? payload.predictions : [];
+      const counts = payload.counts || {};
+      const signals = payload.signals || {};
+      const observer = payload.observer || {};
+      const closest = entities.slice().sort((a, b) => a.distance_m - b.distance_m)[0];
+
+      document.getElementById('statEntities').textContent = String(entities.length);
+      document.getElementById('statBindings').textContent = String(counts.bindings || 0);
+      document.getElementById('statNearby').textContent = String(counts.nearby_entities || 0);
+      document.getElementById('statForecasts').textContent = String(counts.forecast_paths || predictions.length || 0);
+      document.getElementById('statClosest').textContent = closest ? Math.round(closest.distance_m) + ' m' : '-';
+
+      setChip('chipObserver', 'Observer: ' + (observer.observer_id || state.observerId || 'unknown'), 'ok');
+      setChip('chipSensor', 'Sensor: ' + (hasBridge() && ScytheBridge.isSensorServiceRunning && ScytheBridge.isSensorServiceRunning() ? 'online' : 'standby'),
+        hasBridge() && ScytheBridge.isSensorServiceRunning && ScytheBridge.isSensorServiceRunning() ? 'ok' : 'warn');
+
+      document.getElementById('observerMeta').textContent =
+        'Observer: ' + (observer.label || observer.observer_id || 'unknown') + '\n' +
+        'Position: ' + fmtCoord(observer.lat) + ', ' + fmtCoord(observer.lon) + '\n' +
+        'Altitude: ' + Math.round(observer.alt_m || 0) + ' m\n' +
+        'Source: ' + (observer.source || 'unknown');
+
+      document.getElementById('footerMeta').textContent =
+        'Server URL: ' + (state.serverUrl || 'unavailable') + '\n' +
+        'Relay URL: ' + (state.relayUrl || 'unavailable') + '\n' +
+        'App Version: ' + (state.appVersion || 'unknown') + '\n' +
+        'Forecast paths: ' + String(counts.forecast_paths || predictions.length || 0) +
+        ' / projectable: ' + String(counts.projectable_forecasts || 0) + '\n' +
+        'QuestDB edge rate: ' + round(signals.questdb_edge_rate_eps || 0) + ' eps' +
+        ' | fan-in: ' + String(signals.questdb_fanin_events || 0) +
+        ' | alerts: ' + String(signals.questdb_recent_alerts || 0) + '\n' +
+        'Projection timestamp: ' + new Date((payload.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString() + '\n' +
+        'Mode: north-up observer-relative projection with ghost/dashed forecast paths; ARCore renderer can consume the same payload later.';
+
+      const hasMotionGhosts = predictions.some((prediction) => Array.isArray(prediction.projected_path) && prediction.projected_path.length);
+      setChip('chipMode',
+        hasMotionGhosts ? 'Mode: north-up + motion ghosts' : predictions.length ? 'Mode: north-up + forecast ghosts' : 'Mode: north-up projection',
+        predictions.length ? 'warn' : '');
+      renderRadar(entities, predictions);
+      renderList(entities, predictions);
+    }
+
+    function radarPoint(item, maxDistance) {
+      const distance = Math.max(0, item.distance_m || 0);
+      const radius = Math.min(190, (distance / maxDistance) * 190);
+      const angle = ((item.absolute_bearing_deg || 0) - 90) * Math.PI / 180;
+      return {
+        x: 210 + Math.cos(angle) * radius,
+        y: 210 + Math.sin(angle) * radius
+      };
+    }
+
+    function renderRadar(entities, predictions) {
+      const layer = document.getElementById('radarLayer');
+      layer.innerHTML = '';
+      if (!entities.length && !predictions.length) {
+        layer.innerHTML = '<text x="210" y="210" fill="#86a0bf" font-family="monospace" font-size="12" text-anchor="middle">No projected entities</text>';
+        return;
+      }
+      const forecastTargets = predictions
+        .map((prediction) => prediction.projected_target)
+        .filter(Boolean);
+      const allRangeItems = entities.concat(forecastTargets);
+      const maxDistance = Math.max(800, ...allRangeItems.map((item) => item.distance_m || 0));
+      const entityPoints = new Map();
+      entities.forEach((entity) => {
+        const point = radarPoint(entity, maxDistance);
+        const x = point.x;
+        const y = point.y;
+        const color = entity.type === 'RF_IP_BOUND' ? '#3ad7ff' : '#7cf29c';
+        const size = 5 + Math.max(0, Math.min(8, (entity.confidence || 0.5) * 8));
+        const label = escapeXml(entity.label || entity.entity_id || 'target');
+        entityPoints.set(entity.entity_id, point);
+        layer.insertAdjacentHTML('beforeend',
+          '<line x1="210" y1="210" x2="' + x.toFixed(2) + '" y2="' + y.toFixed(2) + '" stroke="' + color + '" stroke-opacity="0.25" />' +
+          '<circle cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="' + size.toFixed(1) + '" fill="' + color + '" fill-opacity="0.9" />' +
+          '<text x="' + (x + 10).toFixed(2) + '" y="' + (y - 10).toFixed(2) + '" fill="#dbe8ff" font-family="monospace" font-size="11">' + label + '</text>');
+      });
+      predictions.forEach((prediction) => {
+        const target = prediction.projected_target;
+        if (!target) {
+          return;
+        }
+        const targetPoint = radarPoint(target, maxDistance);
+        const seed = prediction.seed_projection || {};
+        const seedPoint = entityPoints.get(prediction.current_entity_id) || (seed.absolute_bearing_deg != null ? radarPoint(seed, maxDistance) : { x: 210, y: 210 });
+        const confidence = Math.max(0.35, Math.min(0.92, prediction.confidence || 0.5));
+        const label = escapeXml(prediction.target_label || target.label || prediction.target_entity_id || 'forecast');
+        const motionPoints = Array.isArray(prediction.projected_path) ? prediction.projected_path.map((point) => radarPoint(point, maxDistance)) : [];
+        if (motionPoints.length) {
+          const polyline = [seedPoint].concat(motionPoints)
+            .map((point) => point.x.toFixed(2) + ',' + point.y.toFixed(2))
+            .join(' ');
+          layer.insertAdjacentHTML('beforeend',
+            '<polyline points="' + polyline + '" fill="none" stroke="rgba(255,164,255,' + confidence.toFixed(2) + ')" stroke-width="2.4" stroke-dasharray="5 5">' +
+              '<animate attributeName="stroke-dashoffset" from="22" to="0" dur="1.4s" repeatCount="indefinite" />' +
+            '</polyline>');
+          motionPoints.forEach((point, index) => {
+            const pathMeta = ((prediction.projected_path || [])[index] || {}).metadata || {};
+            const radius = Math.max(2.5, Math.min(6.5, ((pathMeta.radius_m || 24) / 18)));
+            layer.insertAdjacentHTML('beforeend',
+              '<circle cx="' + point.x.toFixed(2) + '" cy="' + point.y.toFixed(2) + '" r="' + radius.toFixed(1) + '" fill="rgba(255,196,255,0.24)" stroke="rgba(255,196,255,0.66)" stroke-width="1" />');
+          });
+        }
+        layer.insertAdjacentHTML('beforeend',
+          '<line x1="' + (motionPoints.length ? motionPoints[motionPoints.length - 1].x : seedPoint.x).toFixed(2) + '" y1="' + (motionPoints.length ? motionPoints[motionPoints.length - 1].y : seedPoint.y).toFixed(2) + '" x2="' + targetPoint.x.toFixed(2) + '" y2="' + targetPoint.y.toFixed(2) + '" stroke="rgba(192,132,252,' + confidence.toFixed(2) + ')" stroke-width="2" stroke-dasharray="7 6">' +
+            '<animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.6s" repeatCount="indefinite" />' +
+          '</line>' +
+          '<circle cx="' + targetPoint.x.toFixed(2) + '" cy="' + targetPoint.y.toFixed(2) + '" r="9" fill="none" stroke="rgba(192,132,252,' + confidence.toFixed(2) + ')" stroke-width="1.5">' +
+            '<animate attributeName="r" values="7;11;7" dur="1.8s" repeatCount="indefinite" />' +
+            '<animate attributeName="stroke-opacity" values="0.35;0.9;0.35" dur="1.8s" repeatCount="indefinite" />' +
+          '</circle>' +
+          '<circle cx="' + targetPoint.x.toFixed(2) + '" cy="' + targetPoint.y.toFixed(2) + '" r="4.5" fill="rgba(192,132,252,0.78)" />' +
+          '<text x="' + (targetPoint.x + 10).toFixed(2) + '" y="' + (targetPoint.y + 14).toFixed(2) + '" fill="#d9c2ff" font-family="monospace" font-size="11">' + label + '</text>');
+      });
+    }
+
+    function renderList(entities, predictions) {
+      const list = document.getElementById('targetList');
+      if (!entities.length && !predictions.length) {
+        list.innerHTML = '<div class="empty">No targets are currently projected. Start the phone sensor or wait for RF/IP bindings and nearby recon entities.</div>';
+        return;
+      }
+      const observedCards = entities.map((entity) => {
+        const lane = entity.type === 'RF_IP_BOUND' ? 'binding' : 'entity';
+        return (
+          '<article class="card">' +
+            '<h3>' + escapeXml(entity.label || entity.entity_id) + '</h3>' +
+            '<div class="meta">' +
+              'Entity: ' + escapeXml(entity.entity_id || 'unknown') + '\n' +
+              'Distance: ' + Math.round(entity.distance_m || 0) + ' m\n' +
+              'Bearing: ' + round(entity.absolute_bearing_deg) + ' deg absolute / ' + round(entity.relative_bearing_deg) + ' deg relative\n' +
+              'Elevation: ' + round(entity.elevation_deg) + ' deg\n' +
+              'Confidence: ' + Math.round((entity.confidence || 0) * 100) + '%' +
+            '</div>' +
+            '<div class="lane ' + lane + '">' + escapeXml(entity.type || entity.source || 'projection') + '</div>' +
+          '</article>'
+        );
+      }).join('');
+      const forecastCards = predictions.map((prediction) => {
+        const target = prediction.projected_target || {};
+        const evidence = prediction.supporting_evidence || {};
+        const motion = prediction.motion_forecast || {};
+        const motionPath = Array.isArray(motion.path) ? motion.path : [];
+        const pathTail = motionPath.length ? motionPath[motionPath.length - 1] : null;
+        const motionSummary = motionPath.length
+          ? '\nMotion: ' + escapeXml(motion.model || 'kinematic') +
+            ' / ' + motionPath.length + ' ghost states' +
+            '\nProjected footprint: ' + Math.round((pathTail && pathTail.radius_m) || 0) + ' m'
+          : '';
+        return (
+          '<article class="card">' +
+            '<h3>' + escapeXml(prediction.target_label || prediction.target_entity_id || 'Forecast target') + '</h3>' +
+            '<div class="meta">' +
+              'Path: ' + escapeXml(prediction.current_label || prediction.current_entity_id || 'seed') + ' -> ' + escapeXml(prediction.target_label || prediction.target_entity_id || 'target') + '\n' +
+              'Confidence: ' + Math.round((prediction.confidence || 0) * 100) + '%\n' +
+               'Time horizon: ' + Math.round(prediction.time_horizon_s || 0) + ' s\n' +
+               'Projected range: ' + (target.distance_m != null ? Math.round(target.distance_m) + ' m' : 'not yet projectable') + '\n' +
+               'Evidence: stitch=' + round(evidence.identity_similarity || 0) +
+               ' fanin=' + round(evidence.fanin_score || 0) +
+               ' temporal=' + round(evidence.temporal_pressure || 0)
+            + motionSummary + '</div>' +
+            '<div class="lane forecast">' + escapeXml(prediction.kind || 'CONTROL_PATH_PREDICTED') + '</div>' +
+          '</article>'
+        );
+      }).join('');
+      list.innerHTML =
+        (observedCards ? '<div class="section-title">Observed targets</div>' + observedCards : '') +
+        (forecastCards ? '<div class="section-title">Forecast paths</div>' + forecastCards : '');
+    }
+
+    function fmtCoord(value) {
+      return typeof value === 'number' ? value.toFixed(5) : 'n/a';
+    }
+
+    function round(value) {
+      return Math.round((value || 0) * 10) / 10;
+    }
+
+    function escapeXml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function init() {
+      state.serverUrl = getBridgeString('getServerUrl');
+      state.relayUrl = getBridgeString('getRelayUrl');
+      state.observerId = getBridgeString('getObserverId', 'android-demo');
+      state.appVersion = getBridgeString('getAppVersion', 'unknown');
+
+      document.getElementById('btnRefresh').addEventListener('click', loadProjection);
+      document.getElementById('btnSensor').addEventListener('click', () => {
+        if (hasBridge() && typeof ScytheBridge.startSensorService === 'function') {
+          ScytheBridge.startSensorService();
+          setTimeout(loadProjection, 1200);
+        }
+      });
+      document.getElementById('btnSettings').addEventListener('click', () => {
+        if (hasBridge() && typeof ScytheBridge.openSettings === 'function') {
+          ScytheBridge.openSettings();
+        }
+      });
+      document.getElementById('btnDemo').addEventListener('click', () => {
+        window.location.href = 'file:///android_asset/eve_demo.html';
+      });
+      document.getElementById('btnReturn').addEventListener('click', () => {
+        if (state.serverUrl) {
+          window.location.href = state.serverUrl.replace(/\/$/, '') + '/command-ops-visualization.html';
+        }
+      });
+
+      loadProjection();
+      state.timer = setInterval(loadProjection, 5000);
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (state.timer) {
+        clearInterval(state.timer);
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

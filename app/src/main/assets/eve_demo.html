@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCYTHE EVE Offline Demo</title>
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --surface: #151c2f;
+      --surface-2: #1d2640;
+      --accent: #00d4ff;
+      --accent-2: #9b59b6;
+      --ok: #55efc4;
+      --warn: #fdcb6e;
+      --text: #dbe7ff;
+      --muted: #8091b5;
+      --danger: #ff7675;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #14213d, var(--bg) 55%);
+      color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .wrap { padding: 16px; }
+    .hero {
+      border: 1px solid rgba(0, 212, 255, 0.22);
+      border-radius: 16px;
+      background: rgba(8, 13, 24, 0.82);
+      padding: 16px;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+    }
+    .eyebrow {
+      color: var(--accent);
+      font: 600 12px/1 monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 10px 0 8px;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    .sub {
+      color: var(--muted);
+      margin: 0 0 14px;
+    }
+    .toolbar, .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font: 600 12px/1 monospace;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+      background: var(--surface-2);
+      color: var(--text);
+    }
+    button.primary { background: var(--accent); color: #04131b; }
+    button.secondary { background: rgba(155, 89, 182, 0.22); color: #e6d7ff; }
+    button.ghost { border: 1px solid rgba(255,255,255,0.08); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .stat {
+      background: rgba(18, 24, 40, 0.9);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .stat .k {
+      color: var(--muted);
+      font: 600 11px/1 monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .stat .v {
+      margin-top: 6px;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .lanes {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .panel {
+      background: rgba(11, 16, 29, 0.9);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 14px;
+      min-height: 260px;
+    }
+    .panel h2 {
+      margin: 0 0 6px;
+      font-size: 16px;
+    }
+    .lane-meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    .chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .chip {
+      border-radius: 999px;
+      padding: 5px 10px;
+      font: 600 11px/1 monospace;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+    }
+    .chip.online { background: rgba(85, 239, 196, 0.16); color: var(--ok); }
+    .chip.ground { background: rgba(155, 89, 182, 0.18); color: #e2c7ff; }
+    .scene {
+      width: 100%;
+      height: 320px;
+      background:
+        radial-gradient(circle at 55% 45%, rgba(0, 212, 255, 0.12), transparent 30%),
+        linear-gradient(180deg, rgba(255,255,255,0.04), transparent);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    svg { width: 100%; height: 100%; display: block; }
+    .feed {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+      max-height: 170px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .feed-item {
+      background: rgba(255,255,255,0.04);
+      border-left: 3px solid var(--accent);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 12px;
+    }
+    .feed-item.ground { border-left-color: var(--accent-2); }
+    .feed-item.warn { border-left-color: var(--warn); }
+    .meta-block {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-family: monospace;
+      white-space: pre-line;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .legend-item {
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.04);
+      font-size: 12px;
+    }
+    .dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    .dot.c { background: var(--accent); }
+    .dot.g { background: var(--accent-2); }
+    .dot.o { background: var(--ok); }
+    @media (max-width: 900px) {
+      .lanes { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">SCYTHE EVE :: OFFLINE DEMO</div>
+      <h1>Continuous lane + grounding lane, no server required</h1>
+      <p class="sub">
+        This local scene demonstrates the same split you asked for:
+        the phone sensor can feed a continuous relay lane for live operator visibility,
+        while GraphOps uses short grounding bursts to inject observed entities into the graph.
+      </p>
+
+      <div class="toolbar">
+        <button class="primary" id="btnContinuous">Start Continuous Lane</button>
+        <button class="secondary" id="btnGround">Inject Grounding Burst</button>
+        <button class="ghost" id="btnSensor">Start Phone Sensor</button>
+        <button class="ghost" id="btnSettings">Open Settings</button>
+        <button class="ghost" id="btnReturn">Return Live Ops</button>
+      </div>
+
+      <div class="grid">
+        <div class="stat"><div class="k">Continuous relay</div><div class="v" id="statRelayEvents">0 ev</div></div>
+        <div class="stat"><div class="k">Grounding bursts</div><div class="v" id="statGroundBursts">0</div></div>
+        <div class="stat"><div class="k">Observed nodes</div><div class="v" id="statNodes">4</div></div>
+        <div class="stat"><div class="k">Observed edges</div><div class="v" id="statEdges">4</div></div>
+      </div>
+    </section>
+
+    <div class="lanes">
+      <section class="panel">
+        <h2>Local arc scene</h2>
+        <div class="lane-meta">Inspired by the globe injector pattern: deferred edge flush after new observed nodes land.</div>
+        <div class="scene">
+          <svg viewBox="0 0 720 320" aria-label="SCYTHE EVE lane demo scene">
+            <defs>
+              <linearGradient id="gContinuous" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.1"/>
+                <stop offset="60%" stop-color="#00d4ff" stop-opacity="0.9"/>
+                <stop offset="100%" stop-color="#55efc4" stop-opacity="0.5"/>
+              </linearGradient>
+              <linearGradient id="gGround" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#9b59b6" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#9b59b6" stop-opacity="0.9"/>
+              </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="720" height="320" fill="transparent" />
+            <ellipse cx="500" cy="150" rx="160" ry="112" fill="rgba(10,20,38,0.55)" stroke="rgba(0,212,255,0.13)" stroke-width="1.5"/>
+
+            <path id="pathContinuous" d="M100 244 C190 180, 250 140, 350 126 S520 112, 608 96" fill="none" stroke="url(#gContinuous)" stroke-width="4" stroke-linecap="round"/>
+            <path id="pathGround" d="M350 126 C418 150, 485 175, 556 205" fill="none" stroke="url(#gGround)" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 8"/>
+
+            <g id="edgeLayer"></g>
+            <g id="particleLayer"></g>
+            <g id="nodeLayer"></g>
+          </svg>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><span class="dot c"></span>Continuous lane: phone sensor -> relay -> live operator view</div>
+          <div class="legend-item"><span class="dot g"></span>Grounding lane: GraphOps burst -> observed node/edge injection</div>
+          <div class="legend-item"><span class="dot o"></span>Observed node: sensor-backed, not inferred</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Lane status</h2>
+        <div class="chips">
+          <span class="chip" id="chipSensor">Phone sensor idle</span>
+          <span class="chip" id="chipContinuous">Continuous lane paused</span>
+          <span class="chip ground" id="chipGrounding">Grounding lane ready</span>
+        </div>
+        <div class="meta-block" id="bridgeMeta">Bridge: checking...
+Server: --
+Relay: --
+Location: --</div>
+
+        <div class="actions">
+          <button class="primary" id="btnPulse">Pulse Relay Event</button>
+          <button class="secondary" id="btnBurstSmall">Short Burst</button>
+          <button class="secondary" id="btnBurstLarge">Heavy Burst</button>
+        </div>
+
+        <div class="feed" id="feed"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const feed = document.getElementById('feed');
+      const nodeLayer = document.getElementById('nodeLayer');
+      const edgeLayer = document.getElementById('edgeLayer');
+      const particleLayer = document.getElementById('particleLayer');
+      const svgNS = 'http://www.w3.org/2000/svg';
+
+      const state = {
+        relayRunning: false,
+        sensorRunning: false,
+        relayEvents: 0,
+        groundBursts: 0,
+        graphNodes: 4,
+        graphEdges: 4,
+        observedCounter: 0,
+        intervalId: null,
+        nodes: [
+          { id: 'phone',   x: 100, y: 244, label: 'Phone Sensor', fill: '#55efc4', ring: '#55efc4', r: 14 },
+          { id: 'relay',   x: 350, y: 126, label: 'Stream Relay', fill: '#00d4ff', ring: '#00d4ff', r: 14 },
+          { id: 'view',    x: 608, y: 96,  label: 'Live UI View', fill: '#00d4ff', ring: '#66f2ff', r: 12 },
+          { id: 'ground',  x: 556, y: 205, label: 'GraphOps', fill: '#9b59b6', ring: '#c88cff', r: 12 }
+        ],
+        observedNodes: []
+      };
+
+      function bridge(name, fallback) {
+        try {
+          if (window.ScytheBridge && typeof window.ScytheBridge[name] === 'function') {
+            return window.ScytheBridge[name]();
+          }
+        } catch (e) {}
+        return fallback;
+      }
+
+      function setText(id, text) {
+        document.getElementById(id).textContent = text;
+      }
+
+      function setChip(id, text, online) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.classList.toggle('online', !!online);
+      }
+
+      function appendFeed(text, kind) {
+        const item = document.createElement('div');
+        item.className = 'feed-item' + (kind ? ' ' + kind : '');
+        item.textContent = text;
+        feed.prepend(item);
+        while (feed.children.length > 10) feed.removeChild(feed.lastChild);
+      }
+
+      function makeSvg(tag, attrs) {
+        const el = document.createElementNS(svgNS, tag);
+        Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, String(v)));
+        return el;
+      }
+
+      function drawScene() {
+        edgeLayer.innerHTML = '';
+        nodeLayer.innerHTML = '';
+
+        const baseEdges = [
+          ['phone', 'relay', '#00d4ff', 0.5],
+          ['relay', 'view', '#00d4ff', 0.55],
+          ['relay', 'ground', '#9b59b6', 0.45]
+        ];
+        baseEdges.forEach(([aId, bId, color, opacity]) => {
+          const a = getNode(aId);
+          const b = getNode(bId);
+          edgeLayer.appendChild(makeSvg('line', {
+            x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+            stroke: color, 'stroke-opacity': opacity, 'stroke-width': 2
+          }));
+        });
+
+        state.observedNodes.forEach(n => {
+          const ground = getNode('ground');
+          edgeLayer.appendChild(makeSvg('path', {
+            d: `M ${ground.x} ${ground.y} Q ${(ground.x + n.x) / 2} ${Math.min(ground.y, n.y) - 34} ${n.x} ${n.y}`,
+            fill: 'none',
+            stroke: '#9b59b6',
+            'stroke-opacity': '0.72',
+            'stroke-width': '2'
+          }));
+        });
+
+        [...state.nodes, ...state.observedNodes].forEach(node => {
+          nodeLayer.appendChild(makeSvg('circle', {
+            cx: node.x, cy: node.y, r: node.r + 7,
+            fill: node.ring, 'fill-opacity': 0.08
+          }));
+          nodeLayer.appendChild(makeSvg('circle', {
+            cx: node.x, cy: node.y, r: node.r,
+            fill: node.fill, stroke: node.ring, 'stroke-width': 1.5
+          }));
+          const label = makeSvg('text', {
+            x: node.x, y: node.y + node.r + 18,
+            fill: '#dbe7ff', 'font-size': 11, 'font-family': 'monospace',
+            'text-anchor': 'middle'
+          });
+          label.textContent = node.label;
+          nodeLayer.appendChild(label);
+        });
+      }
+
+      function getNode(id) {
+        return [...state.nodes, ...state.observedNodes].find(n => n.id === id);
+      }
+
+      function launchParticle(pathId, color, duration) {
+        const circle = makeSvg('circle', { r: 4, fill: color });
+        const motion = makeSvg('animateMotion', {
+          dur: duration || '2.2s',
+          begin: '0s',
+          fill: 'freeze',
+          path: document.getElementById(pathId).getAttribute('d')
+        });
+        circle.appendChild(motion);
+        particleLayer.appendChild(circle);
+        setTimeout(() => circle.remove(), 2400);
+      }
+
+      function updateStats() {
+        setText('statRelayEvents', state.relayEvents + ' ev');
+        setText('statGroundBursts', String(state.groundBursts));
+        setText('statNodes', String(state.graphNodes));
+        setText('statEdges', String(state.graphEdges));
+      }
+
+      function emitContinuousPulse(source) {
+        state.relayEvents += 1;
+        launchParticle('pathContinuous', '#00d4ff', '2s');
+        updateStats();
+        setChip('chipContinuous', 'Continuous lane active', true);
+        appendFeed((source || 'Relay') + ' event #' + state.relayEvents + ' pushed to live UI lane.');
+      }
+
+      function injectObservedBurst(size) {
+        state.groundBursts += 1;
+        const burstSize = size || 3;
+        appendFeed('Grounding burst #' + state.groundBursts + ' observed ' + burstSize + ' entities.', 'ground');
+        setChip('chipGrounding', 'Grounding burst committed', true);
+        launchParticle('pathGround', '#c88cff', '1.6s');
+
+        const startIndex = state.observedCounter;
+        for (let i = 0; i < burstSize; i++) {
+          const idx = startIndex + i;
+          const angle = (-35 + idx * 28) * Math.PI / 180;
+          state.observedNodes.push({
+            id: 'observed-' + idx,
+            x: 520 + Math.cos(angle) * 110,
+            y: 156 + Math.sin(angle) * 72,
+            label: 'OBS-' + (idx + 1),
+            fill: '#55efc4',
+            ring: '#55efc4',
+            r: 10
+          });
+        }
+        state.observedCounter += burstSize;
+        state.graphNodes = 4 + state.observedNodes.length;
+
+        setTimeout(() => {
+          state.graphEdges += burstSize;
+          drawScene();
+          updateStats();
+        }, 220);
+        drawScene();
+        updateStats();
+      }
+
+      function toggleContinuous() {
+        if (state.intervalId) {
+          clearInterval(state.intervalId);
+          state.intervalId = null;
+          state.relayRunning = false;
+          setChip('chipContinuous', 'Continuous lane paused', false);
+          document.getElementById('btnContinuous').textContent = 'Start Continuous Lane';
+          appendFeed('Continuous lane paused.', 'warn');
+          return;
+        }
+        state.intervalId = setInterval(() => emitContinuousPulse('Continuous lane'), 2200);
+        state.relayRunning = true;
+        setChip('chipContinuous', 'Continuous lane active', true);
+        document.getElementById('btnContinuous').textContent = 'Pause Continuous Lane';
+        emitContinuousPulse('Continuous lane');
+      }
+
+      function syncBridgeState() {
+        const serverUrl = bridge('getServerUrl', 'offline');
+        const relayUrl = bridge('getRelayUrl', 'local-demo');
+        const sensorRunning = !!bridge('isSensorServiceRunning', false);
+        const loc = bridge('getDeviceLocation', '{"error":"unavailable"}');
+        let locText = '--';
+        try {
+          const data = JSON.parse(loc);
+          if (data.lat != null && data.lon != null) {
+            locText = Number(data.lat).toFixed(4) + ', ' + Number(data.lon).toFixed(4);
+          } else if (data.error) {
+            locText = data.error;
+          }
+        } catch (e) {
+          locText = 'unavailable';
+        }
+        state.sensorRunning = sensorRunning;
+        setChip('chipSensor', sensorRunning ? 'Phone sensor running' : 'Phone sensor idle', sensorRunning);
+        document.getElementById('btnSensor').textContent = sensorRunning ? 'Stop Phone Sensor' : 'Start Phone Sensor';
+        document.getElementById('bridgeMeta').textContent =
+          'Bridge: ' + (window.ScytheBridge ? 'available' : 'demo only')
+          + '\nServer: ' + serverUrl
+          + '\nRelay: ' + relayUrl
+          + '\nLocation: ' + locText;
+      }
+
+      document.getElementById('btnContinuous').addEventListener('click', toggleContinuous);
+      document.getElementById('btnPulse').addEventListener('click', () => emitContinuousPulse('Manual relay'));
+      document.getElementById('btnGround').addEventListener('click', () => injectObservedBurst(3));
+      document.getElementById('btnBurstSmall').addEventListener('click', () => injectObservedBurst(2));
+      document.getElementById('btnBurstLarge').addEventListener('click', () => injectObservedBurst(5));
+      document.getElementById('btnSettings').addEventListener('click', () => {
+        if (window.ScytheBridge && typeof window.ScytheBridge.openSettings === 'function') {
+          window.ScytheBridge.openSettings();
+        }
+      });
+      document.getElementById('btnSensor').addEventListener('click', () => {
+        if (!window.ScytheBridge) {
+          appendFeed('No native bridge available. Demo stays local.', 'warn');
+          return;
+        }
+        if (bridge('isSensorServiceRunning', false)) {
+          window.ScytheBridge.stopSensorService();
+          appendFeed('Requested phone sensor stop.', 'warn');
+        } else {
+          window.ScytheBridge.startSensorService();
+          appendFeed('Requested phone sensor start.');
+        }
+        setTimeout(syncBridgeState, 1200);
+      });
+      document.getElementById('btnReturn').addEventListener('click', () => {
+        const serverUrl = bridge('getServerUrl', '');
+        if (!serverUrl) {
+          appendFeed('No server configured. Use Settings first.', 'warn');
+          return;
+        }
+        location.href = serverUrl.replace(/\/$/, '') + '/command-ops-visualization.html';
+      });
+
+      drawScene();
+      updateStats();
+      appendFeed('Offline demo ready. Relay lane and grounding lane are decoupled by design.');
+      appendFeed('Tip: grounding bursts inject only observed nodes/edges here, not inferred links.', 'ground');
+      syncBridgeState();
+      setInterval(syncBridgeState, 5000);
+      toggleContinuous();
+    })();
+  </script>
+</body>
+</html>

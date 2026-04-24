@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="scythe_bg">#0a0e1a</color>
+    <color name="scythe_accent">#00d4ff</color>
+    <color name="scythe_surface">#1a2035</color>
+    <color name="status_connected">#00ff88</color>
+    <color name="status_disconnected">#ff4444</color>
+    <color name="sensor_active">#00ff88</color>
+</resources>

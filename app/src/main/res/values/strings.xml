@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SCYTHE EVE</string>
+    <string name="server_url_label">Server URL</string>
+    <string name="server_url_hint">http://192.168.1.185:5001</string>
+    <string name="test_connection">Test Connection</string>
+    <string name="discover">Discover</string>
+    <string name="settings">Settings</string>
+    <string name="reload">Reload</string>
+    <string name="twin">Twin</string>
+    <string name="demo">Demo</string>
+    <string name="open_digital_twin">Open Digital Twin</string>
+    <string name="open_offline_demo">Open Offline Demo</string>
+    <string name="connecting">Connecting…</string>
+    <string name="connected">● Connected</string>
+    <string name="disconnected">○ Disconnected</string>
+    <string name="pref_key_server_url">server_url</string>
+    <string name="default_server_url">http://192.168.1.185:5001</string>
+</resources>
