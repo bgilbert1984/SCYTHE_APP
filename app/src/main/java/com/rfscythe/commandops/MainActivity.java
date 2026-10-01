@@ -49,6 +49,12 @@ public class MainActivity extends AppCompatActivity {
     private TextView      tvSensorStatus;
     private TextView      tvSensorMeta;
     private TextView      tvSensorStop;
+    private LinearLayout  sdrBar;
+    private TextView      tvSdrStatus;
+    private TextView      tvSdrMeta;
+    private TextView      tvSdrStart;
+    private TextView      tvSdrStop;
+    private RfSdrManager  sdrManager;
 
     private String serverUrl;
 
@@ -109,6 +115,11 @@ public class MainActivity extends AppCompatActivity {
         tvSensorStatus = findViewById(R.id.tvSensorStatus);
         tvSensorMeta   = findViewById(R.id.tvSensorMeta);
         tvSensorStop   = findViewById(R.id.tvSensorStop);
+        sdrBar      = findViewById(R.id.sdrBar);
+        tvSdrStatus = findViewById(R.id.tvSdrStatus);
+        tvSdrMeta   = findViewById(R.id.tvSdrMeta);
+        tvSdrStart  = findViewById(R.id.tvSdrStart);
+        tvSdrStop   = findViewById(R.id.tvSdrStop);
         Button      btnOpenSettings = findViewById(R.id.btnOpenSettings);
         Button      btnOfflineDemo  = findViewById(R.id.btnOfflineDemo);
         Button      btnDigitalTwin  = findViewById(R.id.btnDigitalTwin);
@@ -205,6 +216,22 @@ public class MainActivity extends AppCompatActivity {
         btnReload.setOnClickListener(v -> loadScythe());
         tvSensorStop.setOnClickListener(v -> stopSensorService());
 
+        // ---- Phase 0: phone SDR (inert without a dongle) ----
+        tvSdrStart.setOnClickListener(v -> { if (sdrManager != null) sdrManager.userStart(); });
+        tvSdrStop.setOnClickListener(v -> { if (sdrManager != null) sdrManager.userStop(); });
+        sdrManager = new RfSdrManager(this);
+        sdrManager.setListener((line1, line2) -> runOnUiThread(() -> {
+            if (line1 == null) {
+                sdrBar.setVisibility(View.GONE);
+                return;
+            }
+            sdrBar.setVisibility(View.VISIBLE);
+            tvSdrStatus.setText(line1);
+            tvSdrMeta.setText(line2 != null ? line2 : "");
+        }));
+        sdrManager.start();
+        sdrManager.handleIntent(getIntent());
+
         requestRuntimePermissions();
         loadScythe();
     }
@@ -230,6 +257,19 @@ public class MainActivity extends AppCompatActivity {
     public void onBackPressed() {
         if (webView.canGoBack()) webView.goBack();
         else super.onBackPressed();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (sdrManager != null) sdrManager.handleIntent(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (sdrManager != null) sdrManager.stop();
+        super.onDestroy();
     }
 
     void loadScythe() {

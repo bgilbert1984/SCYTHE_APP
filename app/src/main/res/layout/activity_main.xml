@@ -188,5 +188,68 @@
             android:paddingEnd="4dp"/>
 
     </LinearLayout>
+    <LinearLayout
+        android:id="@+id/sdrBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/scythe_surface"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvSdrStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/sensor_active"
+                android:textSize="10sp"
+                android:fontFamily="monospace"
+                android:singleLine="true"/>
+
+            <TextView
+                android:id="@+id/tvSdrMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="@color/scythe_accent"
+                android:textSize="9sp"
+                android:fontFamily="monospace"
+                android:maxLines="2"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvSdrStart"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="&#9654; start"
+            android:textColor="@color/sensor_active"
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:paddingStart="12dp"
+            android:paddingEnd="4dp"/>
+
+        <TextView
+            android:id="@+id/tvSdrStop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="&#9632; stop"
+            android:textColor="@color/status_disconnected"
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"/>
+
+    </LinearLayout>
+
 
 </LinearLayout>
