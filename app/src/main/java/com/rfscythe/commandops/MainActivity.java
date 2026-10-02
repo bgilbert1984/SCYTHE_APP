@@ -9,11 +9,14 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.net.Uri;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -29,6 +32,7 @@ import androidx.core.content.ContextCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.webkit.WebViewAssetLoader;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -68,13 +72,14 @@ public class MainActivity extends AppCompatActivity {
     private static final String MODE_OPERATOR = "operator";
     private static final String MODE_SAFARI = "safari";
 
-    private static final String GLOBE_URL = "file:///android_asset/globe/scythe-globe.html";
+    private static final String GLOBE_URL = "https://appassets.androidplatform.net/assets/globe/scythe-globe.html";
 
     /** Phase A placeholder: nominal sensor coverage radius. Per-node when the API provides it. */
     private static final double COVERAGE_RADIUS_M = 25000;
 
     private WebView globeView;
     private GlobeBridge globeBridge;
+    private WebViewAssetLoader globeAssetLoader;
     private volatile boolean globeReady = false;
 
     private View topBar;
@@ -232,7 +237,24 @@ public class MainActivity extends AppCompatActivity {
         globeBridge = new GlobeBridge();
         globeBridge.setReadyListener(() -> runOnUiThread(this::onGlobeReady));
         globeView.addJavascriptInterface(globeBridge, "ScytheGlobeBridge");
+        // Serve the vendored Cesium assets over https://appassets.androidplatform.net
+        // so WebGL textures are same-origin. file:// has an opaque origin and
+        // taints every texture (SecurityError in texImage2D), killing rendering.
+        globeAssetLoader = new WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
+                .build();
         globeView.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                return globeAssetLoader.shouldInterceptRequest(request.getUrl());
+            }
+
+            @Override
+            @SuppressWarnings("deprecation")
+            public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                return globeAssetLoader.shouldInterceptRequest(Uri.parse(url));
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
