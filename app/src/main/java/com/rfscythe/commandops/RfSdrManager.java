@@ -12,6 +12,9 @@ import android.os.Build;
 import android.util.Log;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -234,6 +237,78 @@ public class RfSdrManager {
                 return Float.NaN;
             }
             return SdrNative.sdrGetFloorDb(nativeHandle);
+        }
+    }
+
+    // ---- Phase 2: peak detection + retune ----
+
+    /** Native peak buffer capacity (matches DSP_MAX_PEAKS). */
+    public static final int MAX_PEAKS = 32;
+
+    /** One native peak detection: offset relative to the tune centre. */
+    public static final class Peak {
+        /** RF offset from the tune centre, Hz (exact; see dsp_peak_t). */
+        public final float offsetHz;
+        /** Peak power minus the detection floor, dB. */
+        public final float snrDb;
+        /** 3 dB occupied width, Hz. */
+        public final float bwHz;
+
+        public Peak(float offsetHz, float snrDb, float bwHz) {
+            this.offsetHz = offsetHz;
+            this.snrDb = snrDb;
+            this.bwHz = bwHz;
+        }
+    }
+
+    /**
+     * Reads the peaks stashed by the most recent computeSpectrum().
+     * Call right after computeSpectrum() -- the next compute overwrites
+     * them. Returns an empty list when there are none or on any error.
+     * Holds stateLock, like computeSpectrum().
+     */
+    public List<Peak> getPeaks() {
+        synchronized (stateLock) {
+            List<Peak> out = new ArrayList<>();
+            if (nativeHandle == 0 || !streaming) {
+                return out;
+            }
+            ByteBuffer buf = ByteBuffer.allocateDirect(MAX_PEAKS * 12)
+                    .order(ByteOrder.nativeOrder());
+            int n = SdrNative.sdrGetPeaks(nativeHandle, buf, MAX_PEAKS);
+            if (n <= 0) {
+                return out;
+            }
+            for (int i = 0; i < n; i++) {
+                float off = buf.getFloat(i * 12);
+                float snr = buf.getFloat(i * 12 + 4);
+                float bw = buf.getFloat(i * 12 + 8);
+                if (Float.isNaN(off) || Float.isNaN(snr) || Float.isNaN(bw)) {
+                    continue;
+                }
+                out.add(new Peak(off, snr, bw));
+            }
+            return out;
+        }
+    }
+
+    /**
+     * Retunes the dongle to the given centre frequency. Validates the
+     * R820T/R828D tuning range (24--1766 MHz); the native side flushes
+     * stale buffers including the spectrum tap, so the next report only
+     * sees the new centre. Returns 0 on success, negative on error or
+     * when no dongle is open. Persistence reset is the caller's job --
+     * RfSpectrumReporter watches the centre and resets on change.
+     */
+    public int retune(long hz) {
+        synchronized (stateLock) {
+            if (nativeHandle == 0) {
+                return -1;
+            }
+            if (hz < 24_000_000L || hz > 1_766_000_000L) {
+                return -2;
+            }
+            return SdrNative.sdrSetCenterFreq(nativeHandle, hz);
         }
     }
 

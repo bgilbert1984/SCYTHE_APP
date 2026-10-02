@@ -78,4 +78,17 @@ final class SdrNative {
 
     /** Last successfully tuned centre frequency in Hz, or -1. */
     static native long sdrGetCenterFreq(long handle);
+
+    // ---- Phase 2: native peak detection ----
+
+    /**
+     * Copies up to maxPeaks peaks stashed by the most recent
+     * sdrComputeSpectrum() into a direct ByteBuffer: 3 little-endian
+     * floats per peak -- offset_hz (RF offset from the tune centre),
+     * snr_db (peak minus detection floor), bw_hz (3 dB width).
+     * See dsp_peak_t in sdr_dsp.h. Call right after sdrComputeSpectrum();
+     * the next compute overwrites them. Returns the peak count,
+     * -1 on bad handle/buffer.
+     */
+    static native int sdrGetPeaks(long handle, java.nio.ByteBuffer dst, int maxPeaks);
 }

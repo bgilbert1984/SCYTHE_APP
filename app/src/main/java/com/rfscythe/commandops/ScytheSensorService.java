@@ -112,6 +112,8 @@ public class ScytheSensorService extends Service {
      * connection -- raw I/Q never leaves the phone.
      */
     private BroadcastReceiver spectrumReceiver;
+    /** Phase 2: newly-persisting detections from RfSpectrumReporter. */
+    private BroadcastReceiver detectionReceiver;
     private ScytheRelayClient relayClient;
     private boolean bluetoothScanActive;
     private final Map<String, ObservedBluetoothDevice> bluetoothObservations = new HashMap<>();
@@ -188,6 +190,13 @@ public class ScytheSensorService extends Service {
         };
         LocalBroadcastManager.getInstance(this).registerReceiver(spectrumReceiver,
                 new IntentFilter(RfSpectrumReporter.ACTION_SPECTRUM_READY));
+        detectionReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context ctx, Intent intent) {
+                handleDetectionReady(intent);
+            }
+        };
+        LocalBroadcastManager.getInstance(this).registerReceiver(detectionReceiver,
+                new IntentFilter(RfSpectrumReporter.ACTION_DETECTION_READY));
     }
 
     @Override
@@ -231,6 +240,10 @@ public class ScytheSensorService extends Service {
         }
         if (spectrumReceiver != null) {
             try { LocalBroadcastManager.getInstance(this).unregisterReceiver(spectrumReceiver); }
+            catch (Exception ignored) {}
+        }
+        if (detectionReceiver != null) {
+            try { LocalBroadcastManager.getInstance(this).unregisterReceiver(detectionReceiver); }
             catch (Exception ignored) {}
         }
         Intent i = new Intent(ACTION_STATUS);
@@ -697,6 +710,69 @@ public class ScytheSensorService extends Service {
                     + "Hz floor=" + floorDb + "dB");
         } catch (Exception e) {
             Log.w(TAG, "failed to build spectrum event: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Phase 2: turns newly-persisting detections into "android_rf_detection"
+     * events and uplinks them over the EXISTING relay connection. One event
+     * per first-persisting track; continuously-observed emitters are
+     * suppressed by the tracker, so the relay sees each detection once.
+     * source "android_rtlsdr" marks it EXTERNAL for the backend.
+     * Runs on the main thread (LocalBroadcastManager delivery).
+     */
+    private void handleDetectionReady(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String detJson = intent.getStringExtra(RfSpectrumReporter.EXTRA_DETECTIONS_JSON);
+        long centerHz = intent.getLongExtra(RfSpectrumReporter.EXTRA_CENTER_HZ, 100000000L);
+        long tsMs = intent.getLongExtra(RfSpectrumReporter.EXTRA_TIMESTAMP_MS,
+                System.currentTimeMillis());
+        if (detJson == null || detJson.isEmpty()) {
+            Log.w(TAG, "dropping detection report: empty payload");
+            return;
+        }
+        JSONArray dets;
+        try {
+            dets = new JSONArray(detJson);
+        } catch (Exception e) {
+            Log.w(TAG, "dropping detection report: bad JSON", e);
+            return;
+        }
+        if (dets.length() == 0 || dets.length() > RfSdrManager.MAX_PEAKS) {
+            Log.w(TAG, "dropping detection report: count=" + dets.length());
+            return;
+        }
+
+        try {
+            JSONObject receiver = new JSONObject()
+                    .put("product", "NESDR SMArt v5")
+                    .put("center_hz", centerHz)
+                    .put("sample_rate_hz", 2048000)
+                    .put("gain_db", 40.0);
+
+            JSONObject event = new JSONObject()
+                    .put("type", "android_rf_detection")
+                    .put("source", "android_rtlsdr")
+                    .put("observer_id", "android-" + deviceId)
+                    .put("platform", "android")
+                    .put("callsign", callsign)
+                    .put("timestamp", tsMs / 1000.0)
+                    .put("sensor_context", buildSensorContext())
+                    .put("receiver", receiver)
+                    .put("detections", dets);
+            if (lastLocation != null) {
+                event.put("lat", lastLocation.getLatitude());
+                event.put("lon", lastLocation.getLongitude());
+            }
+            // No invented data: lat/lon omitted (not zeroed) without a fix.
+
+            sendRelayEvent(event);
+            Log.i(TAG, "uplinked android_rf_detection: center=" + centerHz
+                    + "Hz n=" + dets.length());
+        } catch (Exception e) {
+            Log.w(TAG, "failed to build detection event: " + e.getMessage());
         }
     }
 

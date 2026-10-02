@@ -31,6 +31,46 @@
 /* Bytes of uint8 I/Q consumed per dsp_compute_spectrum() call. */
 #define DSP_NEED_BYTES ((size_t)DSP_AVG_BLOCKS * DSP_FFT_N * 2u)
 
+/* ------------------------------------------------------------------ */
+/* Phase 2: native peak detection on the full-resolution averaged      */
+/* periodogram (65536 bins, ~31.25 Hz/bin @ 2.048 MS/s), run BEFORE    */
+/* the 256-bin downsample -- frequency accuracy matters.               */
+/*                                                                     */
+/* Detection constants (documented; Phase 3 tunes these):              */
+/*   DSP_PEAK_THRESH_DB    12.0 dB above the median floor.             */
+/*   DSP_PEAK_MIN_SEP_BINS 8 bins (~250 Hz): one emitter, one peak.    */
+/*   DSP_MAX_PEAKS         32: hard cap per report (bounds the JNI     */
+/*                         buffer; a phone screen of RF should never   */
+/*                         hold more).                                 */
+/*                                                                     */
+/* Threshold justification: Hann periodogram noise in dB has std ~4.3  */
+/* dB for a single FFT; 8-block linear averaging drops it to ~1.5 dB.  */
+/* 12 dB is ~8 sigma above the noise -- thermal noise essentially      */
+/* never trips it (the host test finds zero false peaks on pure       */
+/* noise), while anything a human would call a signal (+20 dB and up)  */
+/* clears it with margin.                                              */
+/* ------------------------------------------------------------------ */
+#define DSP_PEAK_THRESH_DB    12.0f
+#define DSP_PEAK_MIN_SEP_BINS 8
+#define DSP_MAX_PEAKS         32
+
+/*
+ * One detected peak. 12 bytes, no padding on LP64/arm64.
+ * JNI layout (documented -- SdrNative.sdrGetPeaks reads this verbatim):
+ *   offset 0: float offset_hz -- RF offset from the tune centre, Hz.
+ *             bin * 2048000/65536 after fftshift (bin 0 = -fs/2).
+ *             Java adds the centre: freq_hz = center_hz + offset_hz.
+ *             (Absolute freq as float would quantize at ~8 Hz near
+ *             100 MHz; the offset stays small and exact.)
+ *   offset 4: float snr_db    -- peak dB minus the detection floor, dB.
+ *   offset 8: float bw_hz     -- 3 dB occupied width, Hz.
+ */
+typedef struct {
+    float offset_hz;
+    float snr_db;
+    float bw_hz;
+} dsp_peak_t;
+
 typedef struct dsp_ctx dsp_ctx_t;
 
 dsp_ctx_t *dsp_create(void);
@@ -45,5 +85,18 @@ void dsp_destroy(dsp_ctx_t *ctx);
  */
 int dsp_compute_spectrum(dsp_ctx_t *ctx, const uint8_t *bytes, size_t nbytes,
                          uint8_t *out256, float *floor_db);
+
+/*
+ * Full pipeline: thumbnail + floor (as above) PLUS peak detection on the
+ * full-resolution periodogram. One FFT pass -- the thumbnail and the peaks
+ * always describe the same 256 ms of data.
+ *   peaks    : caller-allocated array of >= max_peaks dsp_peak_t
+ *              (may be NULL to skip detection, with max_peaks = 0)
+ *   max_peaks: capacity of peaks[]
+ * Returns the number of peaks found (>= 0), or -1 on bad arguments.
+ */
+int dsp_compute_spectrum_peaks(dsp_ctx_t *ctx, const uint8_t *bytes, size_t nbytes,
+                               uint8_t *out256, float *floor_db,
+                               dsp_peak_t *peaks, int max_peaks);
 
 #endif

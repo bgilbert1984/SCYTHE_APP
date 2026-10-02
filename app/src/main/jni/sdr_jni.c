@@ -62,6 +62,10 @@ typedef struct {
     size_t spec_avail;
     dsp_ctx_t *dsp;       /* lazy: kiss cfg + Hann table */
     float last_floor_db;
+    /* Phase 2: peaks stashed by sdrComputeSpectrum, read by sdrGetPeaks.
+     * Same data as the thumbnail -- no second FFT, no re-drain. */
+    dsp_peak_t last_peaks[DSP_MAX_PEAKS];
+    int last_npeaks;
     uint32_t center_hz;
 } sdr_t;
 
@@ -240,6 +244,13 @@ Java_com_rfscythe_commandops_SdrNative_sdrSetCenterFreq(JNIEnv *env, jclass cls,
         rtlsdr_reset_buffer(s->dev); /* flush stale post-retune */
         pthread_mutex_lock(&s->lock);
         s->center_hz = (uint32_t)hz;
+        /* Phase 2: the spectrum tap still holds pre-retune I/Q. Drain it so
+         * the next report only sees the new centre -- otherwise a peak from
+         * the old centre would be stamped with the new one. */
+        s->spec_head = 0;
+        s->spec_tail = 0;
+        s->spec_avail = 0;
+        s->last_npeaks = 0;
         pthread_mutex_unlock(&s->lock);
     }
     return r;
@@ -413,6 +424,9 @@ Java_com_rfscythe_commandops_SdrNative_sdrSpectrumReady(JNIEnv *env, jclass cls,
 /*
  * Drains one report's worth of I/Q from the spectrum tap and computes the
  * 256-bin thumbnail into a direct ByteBuffer (must have capacity >= 256).
+ * Phase 2: peak detection runs in the same FFT pass; the peaks are stashed
+ * and read back with sdrGetPeaks() before the next compute. Thumbnail and
+ * peaks always describe the same 256 ms of data.
  * Returns 0 on success, -1 on bad handle/buffer, -2 when not enough data
  * is buffered yet.
  *
@@ -460,13 +474,17 @@ Java_com_rfscythe_commandops_SdrNative_sdrComputeSpectrum(JNIEnv *env, jclass cl
         return -1;
     }
     float floor_db = 0.0f;
-    int rc = dsp_compute_spectrum(dsp, raw, DSP_NEED_BYTES, out, &floor_db);
+    dsp_peak_t peaks[DSP_MAX_PEAKS];
+    int npeaks = dsp_compute_spectrum_peaks(dsp, raw, DSP_NEED_BYTES, out,
+                                            &floor_db, peaks, DSP_MAX_PEAKS);
     free(raw);
-    if (rc != 0)
+    if (npeaks < 0)
         return -1;
 
     pthread_mutex_lock(&s->lock);
     s->last_floor_db = floor_db;
+    memcpy(s->last_peaks, peaks, sizeof(dsp_peak_t) * (size_t)npeaks);
+    s->last_npeaks = npeaks;
     pthread_mutex_unlock(&s->lock);
     return 0;
 }
@@ -497,4 +515,37 @@ Java_com_rfscythe_commandops_SdrNative_sdrGetCenterFreq(JNIEnv *env, jclass cls,
     uint32_t hz = s->center_hz;
     pthread_mutex_unlock(&s->lock);
     return (jlong)hz;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 2: peak readout.                                              */
+/*                                                                     */
+/* Copies up to maxPeaks peaks stashed by the most recent              */
+/* sdrComputeSpectrum() into a direct ByteBuffer: 3 little-endian      */
+/* floats per peak (offset_hz, snr_db, bw_hz -- see dsp_peak_t in       */
+/* sdr_dsp.h). Call right after sdrComputeSpectrum(); the next        */
+/* compute overwrites them. Returns the peak count, -1 on bad          */
+/* handle/buffer.                                                      */
+/* ------------------------------------------------------------------ */
+JNIEXPORT jint JNICALL
+Java_com_rfscythe_commandops_SdrNative_sdrGetPeaks(JNIEnv *env, jclass cls,
+                                                  jlong h, jobject dst,
+                                                  jint maxPeaks) {
+    (void)cls;
+    sdr_t *s = handle_of(h);
+    if (!s || !dst || maxPeaks <= 0 || maxPeaks > DSP_MAX_PEAKS)
+        return -1;
+
+    uint8_t *out = (*env)->GetDirectBufferAddress(env, dst);
+    jlong cap = (*env)->GetDirectBufferCapacity(env, dst);
+    if (!out || cap < (jlong)maxPeaks * (jlong)sizeof(dsp_peak_t))
+        return -1;
+
+    pthread_mutex_lock(&s->lock);
+    int n = s->last_npeaks;
+    if (n > maxPeaks)
+        n = maxPeaks;
+    memcpy(out, s->last_peaks, sizeof(dsp_peak_t) * (size_t)n);
+    pthread_mutex_unlock(&s->lock);
+    return n;
 }

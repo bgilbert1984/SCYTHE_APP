@@ -8,8 +8,14 @@ import android.util.Log;
 
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Phase 1: edge DSP spectrum reporter.
@@ -34,6 +40,12 @@ public class RfSpectrumReporter {
     public static final String EXTRA_CENTER_HZ = "center_hz";
     public static final String EXTRA_TIMESTAMP_MS = "ts_ms";
 
+    /** Local broadcast: reporter -> ScytheSensorService (new detections). */
+    public static final String ACTION_DETECTION_READY =
+            "com.rfscythe.commandops.ACTION_DETECTION_READY";
+    public static final String EXTRA_DETECTIONS_JSON = "detections_json";
+    // EXTRA_CENTER_HZ and EXTRA_TIMESTAMP_MS are reused for detections.
+
     /** Local broadcast: MainActivity -> reporter status line. */
     public static final String ACTION_REPORTER_STATUS =
             "com.rfscythe.commandops.ACTION_REPORTER_STATUS";
@@ -49,6 +61,8 @@ public class RfSpectrumReporter {
     private final Context appCtx;
     private final RfSdrManager sdr;
     private final Object lock = new Object();
+    /** Phase 2: persistence tracker -- peaks become detections here. */
+    private final RfPersistenceTracker tracker = new RfPersistenceTracker();
 
     private volatile boolean running;
     private volatile boolean relayUp;
@@ -114,7 +128,9 @@ public class RfSpectrumReporter {
                         thumb.clear();
                         float floorDb = sdr.getSpectrumFloorDb();
                         long centerHz = sdr.getCenterFreqHz();
-                        emit(copy, floorDb, centerHz);
+                        List<RfPersistenceTracker.Detection> fresh =
+                                detectPeaks(centerHz);
+                        emit(copy, floorDb, centerHz, fresh);
                         sleepQuiet(reportIntervalMs);
                     } else if (rc == -2) {
                         // Tap not full yet; retry soon, not after a full interval.
@@ -125,6 +141,11 @@ public class RfSpectrumReporter {
                     }
                 } else {
                     // Not streaming or relay down: idle, never spin.
+                    // Persistence only resets when the stream itself stops;
+                    // a relay outage must not lose RF tracks.
+                    if (!sdr.isStreaming()) {
+                        tracker.reset();
+                    }
                     sleepQuiet(IDLE_POLL_MS);
                 }
             } catch (InterruptedException e) {
@@ -143,7 +164,8 @@ public class RfSpectrumReporter {
         Log.i(TAG, "reporter loop stopped");
     }
 
-    private void emit(byte[] thumb, float floorDb, long centerHz) {
+    private void emit(byte[] thumb, float floorDb, long centerHz,
+                      List<RfPersistenceTracker.Detection> fresh) {
         long ts = System.currentTimeMillis();
         Intent i = new Intent(ACTION_SPECTRUM_READY)
                 .putExtra(EXTRA_THUMB_B64, Base64.encodeToString(thumb, Base64.NO_WRAP))
@@ -153,8 +175,66 @@ public class RfSpectrumReporter {
         LocalBroadcastManager.getInstance(appCtx).sendBroadcast(i);
         String status = "spectrum reporting every " + (reportIntervalMs / 1000)
                 + "s — floor " + String.format("%.1f", floorDb) + " dB";
+        int tracked = tracker.trackedCount();
+        int reported = tracker.reportedCount();
+        if (tracked > 0) {
+            status += " — detections: " + reported + "/" + tracked
+                    + (fresh.isEmpty() ? "" : " (" + fresh.size() + " new)");
+        }
         publishStatus(status);
-        Log.i(TAG, "spectrum report: center=" + centerHz + "Hz floor=" + floorDb + "dB");
+        Log.i(TAG, "spectrum report: center=" + centerHz + "Hz floor=" + floorDb
+                + "dB tracked=" + tracked + " reported=" + reported);
+    }
+
+    /**
+     * Phase 2: pulls the native peaks stashed by the last computeSpectrum(),
+     * converts offsets to absolute frequencies, and feeds the persistence
+     * tracker. Newly-persisting detections are broadcast for uplink.
+     * A centre change inside the tracker resets all tracks (retune
+     * invalidates peak matching).
+     */
+    private List<RfPersistenceTracker.Detection> detectPeaks(long centerHz) {
+        List<RfSdrManager.Peak> peaks = sdr.getPeaks();
+        List<RfPersistenceTracker.Peak> abs = new ArrayList<>(peaks.size());
+        for (RfSdrManager.Peak p : peaks) {
+            abs.add(new RfPersistenceTracker.Peak(centerHz + p.offsetHz,
+                    p.snrDb, p.bwHz));
+        }
+        double intervalS = reportIntervalMs / 1000.0;
+        List<RfPersistenceTracker.Detection> fresh =
+                tracker.update(abs, centerHz, intervalS);
+        if (!fresh.isEmpty()) {
+            emitDetections(fresh, centerHz);
+        }
+        return fresh;
+    }
+
+    private void emitDetections(List<RfPersistenceTracker.Detection> fresh,
+                                long centerHz) {
+        try {
+            JSONArray arr = new JSONArray();
+            for (RfPersistenceTracker.Detection d : fresh) {
+                arr.put(new JSONObject()
+                        .put("freq_hz", d.freqHz)
+                        .put("snr_db", (double) d.snrDb)
+                        .put("bw_hz", (double) d.bwHz)
+                        .put("persistence_s", d.persistenceS)
+                        .put("n_observations", d.nObservations));
+            }
+            Intent i = new Intent(ACTION_DETECTION_READY)
+                    .putExtra(EXTRA_DETECTIONS_JSON, arr.toString())
+                    .putExtra(EXTRA_CENTER_HZ, centerHz)
+                    .putExtra(EXTRA_TIMESTAMP_MS, System.currentTimeMillis());
+            LocalBroadcastManager.getInstance(appCtx).sendBroadcast(i);
+            StringBuilder sb = new StringBuilder("new detections persisting:");
+            for (RfPersistenceTracker.Detection d : fresh) {
+                sb.append(String.format(" %.3f MHz (%.1f dB)",
+                        d.freqHz / 1e6, d.snrDb));
+            }
+            Log.i(TAG, sb.toString());
+        } catch (JSONException e) {
+            Log.w(TAG, "failed to build detection broadcast", e);
+        }
     }
 
     private void publishStatus(String status) {

@@ -10,6 +10,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
+import android.text.InputType;
+import android.widget.EditText;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -26,6 +28,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -329,6 +332,8 @@ public class MainActivity extends AppCompatActivity {
         // ---- Phase 0: phone SDR (inert without a dongle) ----
         tvSdrStart.setOnClickListener(v -> { if (sdrManager != null) sdrManager.userStart(); });
         tvSdrStop.setOnClickListener(v -> { if (sdrManager != null) sdrManager.userStop(); });
+        // ---- Phase 2: long-press the SDR bar to retune ----
+        sdrBar.setOnLongClickListener(v -> { showRetuneDialog(); return true; });
         sdrManager = new RfSdrManager(this);
         sdrManager.setListener((line1, line2) -> runOnUiThread(() -> {
             sdrLine1 = line1;
@@ -353,6 +358,52 @@ public class MainActivity extends AppCompatActivity {
     // ------------------------------------------------------------------
     // Globe bridge
     // ------------------------------------------------------------------
+
+    /**
+     * Phase 2: minimal retune affordance -- long-press the SDR status bar
+     * to enter a new centre frequency in MHz. The native side flushes
+     * stale buffers (including the spectrum tap); the reporter watches
+     * the centre and resets persistence on change.
+     */
+    private void showRetuneDialog() {
+        if (sdrManager == null || !sdrManager.isStreaming()) {
+            Toast.makeText(this, "retune needs the SDR streaming",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER
+                | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setHint("centre frequency, MHz (e.g. 100.0)");
+        input.setText(String.format(Locale.US, "%.3f",
+                sdrManager.getCenterFreqHz() / 1e6));
+        input.selectAll();
+        new AlertDialog.Builder(this)
+                .setTitle("Retune SDR")
+                .setMessage("Persistence resets on retune -- tracked peaks start over.")
+                .setView(input)
+                .setPositiveButton("Tune", (d, w) -> {
+                    try {
+                        double mhz = Double.parseDouble(
+                                input.getText().toString().trim());
+                        long hz = Math.round(mhz * 1e6);
+                        int rc = sdrManager.retune(hz);
+                        if (rc == 0) {
+                            Toast.makeText(this, String.format(Locale.US,
+                                    "tuned to %.3f MHz", hz / 1e6),
+                                    Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(this, "retune failed (rc=" + rc + ")",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    } catch (NumberFormatException e) {
+                        Toast.makeText(this, "enter a frequency in MHz",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
 
     /** Evaluate JS against the globe page. Safe to call before ready (no-op). */
     private void globeEval(String js) {
