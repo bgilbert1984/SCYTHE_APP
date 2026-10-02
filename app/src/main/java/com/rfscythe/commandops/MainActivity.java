@@ -8,16 +8,16 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Path;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -26,40 +26,35 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
-import org.maplibre.android.MapLibre;
-import org.maplibre.android.camera.CameraPosition;
-import org.maplibre.android.camera.CameraUpdateFactory;
-import org.maplibre.android.geometry.LatLng;
-import org.maplibre.android.maps.MapLibreMap;
-import org.maplibre.android.maps.MapView;
-import org.maplibre.android.maps.Style;
-import org.maplibre.android.style.layers.FillLayer;
-import org.maplibre.android.style.layers.LineLayer;
-import org.maplibre.android.style.layers.Property;
-import org.maplibre.android.style.layers.PropertyFactory;
-import org.maplibre.android.style.layers.SymbolLayer;
-import org.maplibre.android.style.sources.GeoJsonSource;
-import org.maplibre.geojson.Feature;
-import org.maplibre.geojson.FeatureCollection;
-import org.maplibre.geojson.Point;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Map home (Phase A): native MapLibre GL tactical map.
+ * Globe home: CesiumJS 3D globe (vendored locally, fully offline) in a WebView.
  *
- * - Full-screen dark map; own position (GPS) centered, blue dot.
+ * - Dark globe (#071422), starfield, no imagery/terrain (offline by design).
+ * - Own position (GPS): cyan dot, camera flies to first fix.
  * - Sensor nodes (friendly, blue squares) + coverage rings from
  *   GET /api/rf-hypergraph/visualization — OPERATOR mode only.
  * - RF emitters (amber diamonds) from the same endpoint.
  * - Right-edge layer rail: RF / AIR / SPC / SEA / COV.
  * - Mode banner (SAFARI green / OPERATOR amber), tappable.
  *   SAFARI mode NEVER fetches or renders sensor positions
- *   (structural absence, not hiding).
+ *   (structural absence, not hiding — enforced natively AND in JS).
+ *
+ * The top chrome sits below the display cutout via WindowInsets
+ * (Android 15+ draws edge-to-edge by default).
+ *
+ * Native -> globe: WebView.evaluateJavascript against window.ScytheGlobe.
+ * Globe -> native: GlobeBridge.onGlobeReady() (see GlobeBridge.java).
  *
  * The old WebView home lives on in ConsoleActivity.
  * Phase B seams: SSE entity stream -> refreshNodes(); marker tap ->
@@ -67,37 +62,22 @@ import java.util.Locale;
  */
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TAG = "ScytheMapHome";
+    private static final String TAG = "ScytheGlobeHome";
     private static final String PREFS_NAME = "ScytheCommandPrefs";
     private static final String PREF_MAP_MODE = "map_mode";
     private static final String MODE_OPERATOR = "operator";
     private static final String MODE_SAFARI = "safari";
 
-    private static final String STYLE_DARK =
-        "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
-
-    // MapLibre source / layer ids
-    private static final String SRC_SELF = "self-src";
-    private static final String LYR_SELF = "self-layer";
-    private static final String SRC_SENSORS = "sensors-src";
-    private static final String LYR_SENSORS = "sensors-layer";
-    private static final String SRC_EMITTERS = "emitters-src";
-    private static final String LYR_EMITTERS = "emitters-layer";
-    private static final String SRC_COV = "coverage-src";
-    private static final String LYR_COV_FILL = "coverage-fill";
-    private static final String LYR_COV_LINE = "coverage-line";
-
-    private static final String IMG_SELF = "marker-self";
-    private static final String IMG_SENSOR = "marker-sensor";
-    private static final String IMG_EMITTER = "marker-emitter";
+    private static final String GLOBE_URL = "file:///android_asset/globe/scythe-globe.html";
 
     /** Phase A placeholder: nominal sensor coverage radius. Per-node when the API provides it. */
     private static final double COVERAGE_RADIUS_M = 25000;
 
-    private MapView mapView;
-    private MapLibreMap map;
-    private Style mapStyle;
+    private WebView globeView;
+    private GlobeBridge globeBridge;
+    private volatile boolean globeReady = false;
 
+    private View topBar;
     private TextView tvStatus;
     private TextView modeBanner;
     private LinearLayout sensorBar;
@@ -175,14 +155,11 @@ public class MainActivity extends AppCompatActivity {
     private final LocationListener locationListener = new LocationListener() {
         @Override public void onLocationChanged(Location loc) {
             lastLocation = loc;
-            updateSelfMarker();
-            if (!centeredOnFix && map != null) {
+            pushSelfMarker();
+            if (!centeredOnFix) {
                 centeredOnFix = true;
-                map.animateCamera(CameraUpdateFactory.newCameraPosition(
-                    new CameraPosition.Builder()
-                        .target(new LatLng(loc.getLatitude(), loc.getLongitude()))
-                        .zoom(10)
-                        .build()), 1200);
+                globeEval(String.format(Locale.US, "ScytheGlobe.flyTo(%f, %f, 1500000)",
+                    loc.getLatitude(), loc.getLongitude()));
             }
         }
         @Override public void onStatusChanged(String p, int s, Bundle e) {}
@@ -193,7 +170,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        MapLibre.getInstance(this);
         setContentView(R.layout.activity_main);
 
         serverUrl = ScytheConfig.getServerUrl(this);
@@ -201,7 +177,9 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         mapMode = prefs.getString(PREF_MAP_MODE, MODE_OPERATOR);
 
-        mapView = findViewById(R.id.mapView);
+        View rootLayout = findViewById(R.id.rootLayout);
+        topBar = findViewById(R.id.topBar);
+        globeView = findViewById(R.id.globeView);
         tvStatus = findViewById(R.id.tvStatus);
         modeBanner = findViewById(R.id.modeBanner);
         sensorBar = findViewById(R.id.sensorBar);
@@ -222,16 +200,50 @@ public class MainActivity extends AppCompatActivity {
         ImageButton btnTwin = findViewById(R.id.btnTwin);
         ImageButton btnSettings = findViewById(R.id.btnSettings);
 
-        mapView.onCreate(savedInstanceState);
-        mapView.getMapAsync(mapboxMap -> {
-            map = mapboxMap;
-            mapboxMap.setStyle(new Style.Builder().fromUri(STYLE_DARK), style -> {
-                mapStyle = style;
-                setupMapLayers();
-                updateModeBanner();
-                refreshNodes();
-            });
+        // ---- Display-cutout fix: keep the top chrome below the notch ----
+        // Android 15+ draws edge-to-edge by default, so the window extends under
+        // the status bar / camera cutout. Pad the top chrome by the union of the
+        // system-bar and cutout insets. Self-calibrating: on devices without a
+        // cutout (or when not edge-to-edge) the inset is 0 and nothing moves.
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, insets) -> {
+            int top = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()).top;
+            FrameLayout.LayoutParams barLp = (FrameLayout.LayoutParams) topBar.getLayoutParams();
+            if (barLp.topMargin != top) {
+                barLp.topMargin = top;
+                topBar.setLayoutParams(barLp);
+                FrameLayout.LayoutParams bannerLp =
+                    (FrameLayout.LayoutParams) modeBanner.getLayoutParams();
+                bannerLp.topMargin = top
+                    + (int) (40 * getResources().getDisplayMetrics().density);
+                modeBanner.setLayoutParams(bannerLp);
+            }
+            return insets;
         });
+
+        // ---- Cesium globe ----
+        WebSettings ws = globeView.getSettings();
+        ws.setJavaScriptEnabled(true);
+        ws.setDomStorageEnabled(true);
+        ws.setAllowFileAccess(true);
+        ws.setLoadWithOverviewMode(true);
+        ws.setUseWideViewPort(true);
+        globeView.setBackgroundColor(Color.BLACK);
+        globeBridge = new GlobeBridge();
+        globeBridge.setReadyListener(() -> runOnUiThread(this::onGlobeReady));
+        globeView.addJavascriptInterface(globeBridge, "ScytheGlobeBridge");
+        globeView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // Cesium init is async; the page calls ScytheGlobeBridge.onGlobeReady().
+                // Poll as a fallback in case the bridge callback was missed.
+                view.evaluateJavascript("window.__scytheGlobeReady === true", value -> {
+                    if ("true".equals(value)) runOnUiThread(() -> onGlobeReady());
+                });
+            }
+        });
+        globeView.loadUrl(GLOBE_URL);
 
         modeBanner.setOnClickListener(v -> toggleMode());
         btnLayerRf.setOnClickListener(v -> { showRf = !showRf; applyLayerVisibility(); paintRail(); });
@@ -270,82 +282,50 @@ public class MainActivity extends AppCompatActivity {
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         requestRuntimePermissions();
         paintRail();
+        updateModeBanner();
         updateStatusLine();
+        refreshNodes();
     }
 
     // ------------------------------------------------------------------
-    // Map setup
+    // Globe bridge
     // ------------------------------------------------------------------
 
-    private void setupMapLayers() {
-        if (mapStyle == null) return;
-        mapStyle.addImage(IMG_SELF, makeDotBitmap());
-        mapStyle.addImage(IMG_SENSOR, makeSquareBitmap());
-        mapStyle.addImage(IMG_EMITTER, makeDiamondBitmap());
+    /** Evaluate JS against the globe page. Safe to call before ready (no-op). */
+    private void globeEval(String js) {
+        WebView w = globeView;
+        if (w == null) return;
+        runOnUiThread(() -> {
+            try {
+                w.evaluateJavascript(js, null);
+            } catch (Exception e) {
+                android.util.Log.w(TAG, "globe eval: " + e.getMessage());
+            }
+        });
+    }
 
-        mapStyle.addSource(new GeoJsonSource(SRC_SELF));
-        mapStyle.addSource(new GeoJsonSource(SRC_SENSORS));
-        mapStyle.addSource(new GeoJsonSource(SRC_EMITTERS));
-        mapStyle.addSource(new GeoJsonSource(SRC_COV));
+    /** Called once the Cesium viewer exists (bridge callback or poll fallback). */
+    private void onGlobeReady() {
+        if (globeReady) return;
+        globeReady = true;
+        android.util.Log.i(TAG, "globe ready; pushing state");
+        pushAllToGlobe();
+    }
 
-        SymbolLayer selfLayer = new SymbolLayer(LYR_SELF, SRC_SELF);
-        selfLayer.setProperties(
-            PropertyFactory.iconImage(IMG_SELF),
-            PropertyFactory.iconAllowOverlap(true),
-            PropertyFactory.iconIgnorePlacement(true));
-        mapStyle.addLayer(selfLayer);
-
-        FillLayer covFill = new FillLayer(LYR_COV_FILL, SRC_COV);
-        covFill.setProperties(
-            PropertyFactory.fillColor("rgba(0, 212, 255, 0.07)"));
-        mapStyle.addLayerBelow(covFill, LYR_SELF);
-
-        LineLayer covLine = new LineLayer(LYR_COV_LINE, SRC_COV);
-        covLine.setProperties(
-            PropertyFactory.lineColor("rgba(0, 212, 255, 0.45)"),
-            PropertyFactory.lineWidth(1.5f));
-        mapStyle.addLayerAbove(covLine, LYR_COV_FILL);
-
-        SymbolLayer sensorsLayer = new SymbolLayer(LYR_SENSORS, SRC_SENSORS);
-        sensorsLayer.setProperties(
-            PropertyFactory.iconImage(IMG_SENSOR),
-            PropertyFactory.iconAllowOverlap(true),
-            PropertyFactory.iconIgnorePlacement(true),
-            PropertyFactory.textField("{label}"),
-            PropertyFactory.textSize(11f),
-            PropertyFactory.textColor("#9fd8ff"),
-            PropertyFactory.textOffset(new Float[]{0f, 1.6f}));
-        mapStyle.addLayerAbove(sensorsLayer, LYR_COV_LINE);
-
-        SymbolLayer emittersLayer = new SymbolLayer(LYR_EMITTERS, SRC_EMITTERS);
-        emittersLayer.setProperties(
-            PropertyFactory.iconImage(IMG_EMITTER),
-            PropertyFactory.iconAllowOverlap(true),
-            PropertyFactory.iconIgnorePlacement(true),
-            PropertyFactory.textField("{label}"),
-            PropertyFactory.textSize(11f),
-            PropertyFactory.textColor("#ffd9a0"),
-            PropertyFactory.textOffset(new Float[]{0f, 1.6f}));
-        mapStyle.addLayerAbove(emittersLayer, LYR_SENSORS);
-
+    /** Push the full native state into a freshly-ready globe. */
+    private void pushAllToGlobe() {
+        if (!globeReady) return;
+        globeEval("ScytheGlobe.setMode('" + mapMode + "')");
         applyLayerVisibility();
+        renderNodes();
+        pushSelfMarker();
     }
 
     private void applyLayerVisibility() {
-        if (mapStyle == null) return;
-        setVisible(LYR_SELF, true);
-        setVisible(LYR_SENSORS, showRf && isOperator());
-        setVisible(LYR_EMITTERS, showRf && isOperator());
-        setVisible(LYR_COV_FILL, showCov && isOperator());
-        setVisible(LYR_COV_LINE, showCov && isOperator());
-    }
-
-    private void setVisible(String layerId, boolean visible) {
-        if (mapStyle == null) return;
-        org.maplibre.android.style.layers.Layer l = mapStyle.getLayer(layerId);
-        if (l != null) {
-            l.setProperties(PropertyFactory.visibility(visible ? Property.VISIBLE : Property.NONE));
-        }
+        if (!globeReady) return;
+        globeEval("ScytheGlobe.setLayerVisible('self', true)");
+        globeEval("ScytheGlobe.setLayerVisible('rf', " + (showRf && isOperator()) + ")");
+        globeEval("ScytheGlobe.setLayerVisible('cov', " + (showCov && isOperator()) + ")");
     }
 
     // ------------------------------------------------------------------
@@ -394,65 +374,55 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderNodes() {
-        if (mapStyle == null) return;
-        List<Feature> sensorFeats = new ArrayList<>();
-        List<Feature> emitterFeats = new ArrayList<>();
-        List<Feature> covFeats = new ArrayList<>();
-        for (MapNode n : sensorNodes) {
-            Feature f = Feature.fromGeometry(
-                Point.fromLngLat(n.lon, n.lat));
-            f.addStringProperty("label", n.label);
-            sensorFeats.add(f);
-            covFeats.add(Feature.fromGeometry(coveragePolygon(n.lat, n.lon, COVERAGE_RADIUS_M)));
-        }
-        for (MapNode n : emitterNodes) {
-            String lbl = n.label;
-            String fl = n.frequencyLabel();
-            if (!fl.isEmpty()) lbl = lbl + " " + fl;
-            Feature f = Feature.fromGeometry(
-                Point.fromLngLat(n.lon, n.lat));
-            f.addStringProperty("label", lbl);
-            emitterFeats.add(f);
-        }
-        setSource(SRC_SENSORS, sensorFeats);
-        setSource(SRC_EMITTERS, emitterFeats);
-        setSource(SRC_COV, covFeats);
+        if (!globeReady) return;
+        globeEval("ScytheGlobe.setSensors(" + nodesToJson(sensorNodes, false) + ")");
+        globeEval("ScytheGlobe.setEmitters(" + nodesToJson(emitterNodes, true) + ")");
+        globeEval("ScytheGlobe.setCoverage(" + coverageToJson() + ")");
         applyLayerVisibility();
     }
 
-    private void setSource(String id, List<Feature> feats) {
-        if (mapStyle == null) return;
-        GeoJsonSource src = mapStyle.getSourceAs(id);
-        if (src != null) {
-            src.setGeoJson(FeatureCollection.fromFeatures(feats));
+    private String nodesToJson(List<MapNode> nodes, boolean withFreq) {
+        JSONArray arr = new JSONArray();
+        for (MapNode n : nodes) {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("id", n.id);
+                o.put("lat", n.lat);
+                o.put("lon", n.lon);
+                String lbl = n.label;
+                if (withFreq) {
+                    String fl = n.frequencyLabel();
+                    if (!fl.isEmpty()) lbl = lbl + " " + fl;
+                }
+                o.put("label", lbl);
+                arr.put(o);
+            } catch (Exception e) {
+                android.util.Log.w(TAG, "node json: " + e.getMessage());
+            }
         }
+        return arr.toString();
     }
 
-    private void updateSelfMarker() {
-        if (mapStyle == null || lastLocation == null) return;
-        List<Feature> feats = new ArrayList<>();
-        feats.add(Feature.fromGeometry(Point.fromLngLat(
-            lastLocation.getLongitude(), lastLocation.getLatitude())));
-        setSource(SRC_SELF, feats);
+    private String coverageToJson() {
+        JSONArray arr = new JSONArray();
+        for (MapNode n : sensorNodes) {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("lat", n.lat);
+                o.put("lon", n.lon);
+                o.put("radiusM", COVERAGE_RADIUS_M);
+                arr.put(o);
+            } catch (Exception e) {
+                android.util.Log.w(TAG, "coverage json: " + e.getMessage());
+            }
+        }
+        return arr.toString();
     }
 
-    /** Approximate geodesic circle as a polygon (64 vertices). */
-    private org.maplibre.geojson.Polygon coveragePolygon(double lat, double lon, double radiusM) {
-        List<Point> ring = new ArrayList<>();
-        double latR = Math.toRadians(lat);
-        double angDist = radiusM / 6371000.0;
-        for (int i = 0; i <= 64; i++) {
-            double brng = Math.toRadians(i * (360.0 / 64));
-            double la2 = Math.asin(Math.sin(latR) * Math.cos(angDist)
-                + Math.cos(latR) * Math.sin(angDist) * Math.cos(brng));
-            double lo2 = Math.toRadians(lon) + Math.atan2(
-                Math.sin(brng) * Math.sin(angDist) * Math.cos(latR),
-                Math.cos(angDist) - Math.sin(latR) * Math.sin(la2));
-            ring.add(Point.fromLngLat(Math.toDegrees(lo2), Math.toDegrees(la2)));
-        }
-        List<List<Point>> coords = new ArrayList<>();
-        coords.add(ring);
-        return org.maplibre.geojson.Polygon.fromLngLats(coords);
+    private void pushSelfMarker() {
+        if (!globeReady || lastLocation == null) return;
+        globeEval(String.format(Locale.US, "ScytheGlobe.setSelf(%f, %f)",
+            lastLocation.getLatitude(), lastLocation.getLongitude()));
     }
 
     // ------------------------------------------------------------------
@@ -468,6 +438,7 @@ public class MainActivity extends AppCompatActivity {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             .edit().putString(PREF_MAP_MODE, mapMode).apply();
         updateModeBanner();
+        if (globeReady) globeEval("ScytheGlobe.setMode('" + mapMode + "')");
         refreshNodes();
     }
 
@@ -517,58 +488,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ------------------------------------------------------------------
-    // Marker bitmaps (generated; no assets needed)
-    // ------------------------------------------------------------------
-
-    private Bitmap makeDotBitmap() {
-        int s = 64;
-        Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(b);
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(Color.parseColor("#00d4ff"));
-        c.drawCircle(s / 2f, s / 2f, 14f, p);
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(4f);
-        p.setColor(Color.WHITE);
-        c.drawCircle(s / 2f, s / 2f, 14f, p);
-        return b;
-    }
-
-    private Bitmap makeSquareBitmap() {
-        int s = 64;
-        Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(b);
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(Color.parseColor("#4488ff"));
-        c.drawRect(14, 14, 50, 50, p);
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(4f);
-        p.setColor(Color.WHITE);
-        c.drawRect(14, 14, 50, 50, p);
-        return b;
-    }
-
-    private Bitmap makeDiamondBitmap() {
-        int s = 64;
-        Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(b);
-        Path path = new Path();
-        path.moveTo(s / 2f, 8f);
-        path.lineTo(56f, s / 2f);
-        path.lineTo(s / 2f, 56f);
-        path.lineTo(8f, s / 2f);
-        path.close();
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(Color.parseColor("#ffaa00"));
-        c.drawPath(path, p);
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(4f);
-        p.setColor(Color.WHITE);
-        c.drawPath(path, p);
-        return b;
-    }
-
-    // ------------------------------------------------------------------
     // Permissions / location
     // ------------------------------------------------------------------
 
@@ -605,7 +524,7 @@ public class MainActivity extends AppCompatActivity {
             }
             if (last != null) {
                 lastLocation = last;
-                updateSelfMarker();
+                pushSelfMarker();
             }
         } catch (Exception e) {
             android.util.Log.w(TAG, "location: " + e.getMessage());
@@ -640,13 +559,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        mapView.onStart();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        mapView.onResume();
+        if (globeView != null) globeView.onResume();
         LocalBroadcastManager.getInstance(this).registerReceiver(
             sensorReceiver, new IntentFilter(ScytheSensorService.ACTION_STATUS));
         String newUrl = ScytheConfig.getServerUrl(this);
@@ -661,33 +579,20 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        mapView.onPause();
+        if (globeView != null) globeView.onPause();
         LocalBroadcastManager.getInstance(this).unregisterReceiver(sensorReceiver);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        mapView.onStop();
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        mapView.onSaveInstanceState(outState);
-    }
-
-    @Override
-    public void onLowMemory() {
-        super.onLowMemory();
-        mapView.onLowMemory();
     }
 
     @Override
     protected void onDestroy() {
         stopLocation();
         if (sdrManager != null) sdrManager.stop();
-        mapView.onDestroy();
+        if (globeView != null) globeView.destroy();
         super.onDestroy();
     }
 

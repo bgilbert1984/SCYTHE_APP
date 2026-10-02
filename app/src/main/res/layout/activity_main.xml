@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/scythe_bg">
 
-    <!-- Map home surface -->
-    <org.maplibre.android.maps.MapView
-        android:id="@+id/mapView"
+    <!-- Globe home surface: CesiumJS 3D globe (vendored, offline) -->
+    <WebView
+        android:id="@+id/globeView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:background="@android:color/black" />
 
     <!-- Top bar -->
     <LinearLayout

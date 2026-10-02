@@ -10,3 +10,6 @@ captures/
 *.aab
 .externalNativeBuild/
 .cxx/
+
+# CesiumJS vendored at build time (offline globe)
+app/src/main/assets/cesium/
