@@ -13,12 +13,14 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class ScytheConfig {
 
     public static final String PREFS_NAME = "ScytheCommandPrefs";
     public static final String KEY_SERVER_URL = "server_url";
-    public static final String DEFAULT_SERVER_URL = "http://192.168.1.185:5001";
+    public static final String DEFAULT_SERVER_URL = "https://spectrcyde.com";
 
     private ScytheConfig() {}
 
@@ -98,6 +100,30 @@ public final class ScytheConfig {
         String scheme = "https".equalsIgnoreCase(uri.getScheme()) ? "wss" : "ws";
         String host = uri.getHost() != null ? uri.getHost() : "127.0.0.1";
         return scheme + "://" + host + ":8765/ws";
+    }
+
+    /**
+     * Ordered relay URL candidates: the resolved (or derived) URL first,
+     * then a plain-ws fallback when the primary is wss. Some relays
+     * (e.g. dedirock:8765) do not terminate TLS; the wss handshake fails
+     * while ws succeeds. Callers should try candidates in order.
+     */
+    public static List<String> relayCandidates(String serverUrl) {
+        List<String> out = new ArrayList<>();
+        String primary;
+        try {
+            primary = resolveRelayUrl(serverUrl);
+        } catch (Exception e) {
+            primary = deriveRelayUrl(serverUrl);
+        }
+        if (primary == null || primary.isEmpty()) {
+            primary = deriveRelayUrl(serverUrl);
+        }
+        out.add(primary);
+        if (primary.startsWith("wss://")) {
+            out.add("ws://" + primary.substring(6));
+        }
+        return out;
     }
 
     private static String firstNonEmpty(String... values) {

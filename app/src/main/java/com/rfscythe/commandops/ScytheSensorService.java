@@ -87,6 +87,7 @@ public class ScytheSensorService extends Service {
     private String deviceId;
     private String callsign;
     private String relayUrl;
+    private java.util.List<String> relayCandidates;
     private String lastRelayError;
 
     private Location lastLocation;
@@ -559,13 +560,13 @@ public class ScytheSensorService extends Service {
 
     private void resolveRelayEndpoint() {
         executor.execute(() -> {
-            String resolved = null;
-            try {
-                resolved = ScytheConfig.resolveRelayUrl(serverUrl);
-            } catch (Exception e) {
-                Log.w(TAG, "Falling back to derived relay URL: " + e.getMessage());
+            relayCandidates = ScytheConfig.relayCandidates(serverUrl);
+            relayUrl = (relayCandidates == null || relayCandidates.isEmpty())
+                ? ScytheConfig.deriveRelayUrl(serverUrl)
+                : relayCandidates.get(0);
+            if (relayCandidates != null && relayCandidates.size() > 1) {
+                Log.i(TAG, "Relay candidates: " + relayCandidates);
             }
-            relayUrl = resolved != null ? resolved : ScytheConfig.deriveRelayUrl(serverUrl);
             startRelayClient();
             broadcastStatus();
         });
@@ -576,7 +577,10 @@ public class ScytheSensorService extends Service {
             return;
         }
         stopRelayClient();
-        relayClient = new ScytheRelayClient(relayUrl, new ScytheRelayClient.Listener() {
+        java.util.List<String> urls = (relayCandidates == null || relayCandidates.isEmpty())
+            ? java.util.Collections.singletonList(relayUrl)
+            : relayCandidates;
+        relayClient = new ScytheRelayClient(urls, new ScytheRelayClient.Listener() {
             @Override
             public void onConnected() {
                 relayConnected = true;

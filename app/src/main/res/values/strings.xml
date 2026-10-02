@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">SCYTHE EVE</string>
     <string name="server_url_label">Server URL</string>
-    <string name="server_url_hint">http://192.168.1.185:5001</string>
+    <string name="server_url_hint">https://spectrcyde.com</string>
     <string name="test_connection">Test Connection</string>
     <string name="discover">Discover</string>
     <string name="settings">Settings</string>
@@ -15,5 +15,5 @@
     <string name="connected">● Connected</string>
     <string name="disconnected">○ Disconnected</string>
     <string name="pref_key_server_url">server_url</string>
-    <string name="default_server_url">http://192.168.1.185:5001</string>
+    <string name="default_server_url">https://spectrcyde.com</string>
 </resources>

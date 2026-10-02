@@ -51,6 +51,11 @@
             android:parentActivityName=".MainActivity" />
 
         <activity
+            android:name=".ConsoleActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
             android:name=".DigitalTwinArActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
