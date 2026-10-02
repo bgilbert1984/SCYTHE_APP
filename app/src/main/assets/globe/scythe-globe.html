@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<!--
+  SCYTHE globe home — CesiumJS 1.114, vendored locally (../cesium/).
+  Fully offline: no imagery layer (dark globe), no terrain, no Ion.
+
+  Visual language follows the SCYTHE web demos
+  (scythe-web/regional-rf-demo.html, cesium-hypergraph-globe.html):
+  dark globe (#071422), cyan markers, monospace labels.
+
+  Native bridge (see GlobeBridge.java):
+    window.ScytheGlobe.setSelf(lat, lon)
+    window.ScytheGlobe.setSensors(json)    // [{id,lat,lon,label}]
+    window.ScytheGlobe.setEmitters(json)   // [{id,lat,lon,label}]
+    window.ScytheGlobe.setCoverage(json)   // [{lat,lon,radiusM}]
+    window.ScytheGlobe.setLayerVisible(name, visible)  // 'rf' | 'cov' | 'self'
+    window.ScytheGlobe.setMode(mode)       // 'operator' | 'safari'
+    window.ScytheGlobe.flyTo(lat, lon, heightM)
+  JS -> native: ScytheGlobeBridge.onGlobeReady() once the viewer exists.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>SCYTHE</title>
+<link rel="stylesheet" href="../cesium/Widgets/widgets.css">
+<style>
+  html, body, #cesium-container { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#000; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  /* Belt-and-braces: no Cesium chrome should ever show. */
+  .cesium-viewer-toolbar, .cesium-viewer-animationContainer,
+  .cesium-viewer-timelineContainer, .cesium-viewer-fullscreenContainer,
+  .cesium-viewer-vrContainer, .cesium-viewer-geocoderContainer,
+  .cesium-viewer-selectionIndicatorContainer, .cesium-viewer-infoBoxContainer,
+  .cesium-viewer-navigationHelpButtonWrapper { display:none !important; }
+  .cesium-widget-credits { display:none !important; }
+</style>
+<script src="../cesium/Cesium.js"></script>
+</head>
+<body>
+<div id="cesium-container"></div>
+<script>
+(function () {
+  'use strict';
+
+  var CYAN   = '#00d4ff';
+  var BLUE   = '#4488ff';
+  var AMBER  = '#ffaa00';
+  var LABEL_CYAN  = 'rgba(159,216,255,0.95)';
+  var LABEL_AMBER = 'rgba(255,217,160,0.95)';
+
+  // ---- canvas marker factory (mirrors the Android bitmap markers) ----
+  function markerImage(kind) {
+    var s = 64, c = document.createElement('canvas');
+    c.width = s; c.height = s;
+    var x = c.getContext('2d');
+    x.lineWidth = 4;
+    x.strokeStyle = '#ffffff';
+    if (kind === 'self') {
+      x.fillStyle = CYAN;
+      x.beginPath(); x.arc(s/2, s/2, 14, 0, Math.PI*2); x.fill(); x.stroke();
+    } else if (kind === 'sensor') {
+      x.fillStyle = BLUE;
+      x.fillRect(14, 14, 36, 36); x.strokeRect(14, 14, 36, 36);
+    } else { // emitter: amber diamond
+      x.fillStyle = AMBER;
+      x.beginPath();
+      x.moveTo(s/2, 8); x.lineTo(56, s/2); x.lineTo(s/2, 56); x.lineTo(8, s/2);
+      x.closePath(); x.fill(); x.stroke();
+    }
+    return c;
+  }
+  var IMG = {
+    self: markerImage('self'),
+    sensor: markerImage('sensor'),
+    emitter: markerImage('emitter')
+  };
+
+  function label(text, fillColor) {
+    return {
+      text: text,
+      font: '11px monospace',
+      fillColor: Cesium.Color.fromCssColorString(fillColor),
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, -18),
+      scale: 0.9,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY
+    };
+  }
+
+  // ---- viewer ----
+  var viewer = new Cesium.Viewer('cesium-container', {
+    animation: false,
+    baseLayerPicker: false,
+    baseLayer: false,               // no imagery: offline dark globe
+    fullscreenButton: false,
+    geocoder: false,
+    homeButton: false,
+    infoBox: false,
+    navigationHelpButton: false,
+    sceneModePicker: false,
+    selectionIndicator: false,
+    timeline: false,
+    creditContainer: document.createElement('div'), // swallowed by CSS anyway
+    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+    imageryProvider: false  // long-supported kill-switch; baseLayer:false above is the 1.104+ one
+  });
+  viewer.imageryLayers.removeAll(); // belt-and-braces: no imagery, no tile requests, offline
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#071422');
+  viewer.scene.globe.depthTestAgainstTerrain = false;
+  // Full-globe opening view.
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(0, 25, 26000000)
+  });
+
+  // ---- entity stores ----
+  var selfEntities = [];
+  var sensorEntities = [];
+  var emitterEntities = [];
+  var coverageEntities = [];
+  var layerVisible = { rf: true, cov: true, self: true };
+  var mode = 'operator';
+
+  function clear(list) {
+    for (var i = 0; i < list.length; i++) viewer.entities.remove(list[i]);
+    list.length = 0;
+  }
+
+  function applyVisibility() {
+    var showRf = layerVisible.rf && mode === 'operator';
+    var showCov = layerVisible.cov && mode === 'operator';
+    sensorEntities.forEach(function (e) { e.show = showRf; });
+    emitterEntities.forEach(function (e) { e.show = showRf; });
+    coverageEntities.forEach(function (e) { e.show = showCov; });
+    selfEntities.forEach(function (e) { e.show = layerVisible.self; });
+  }
+
+  function parseNodes(json) {
+    try {
+      var arr = (typeof json === 'string') ? JSON.parse(json) : json;
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+
+  // ---- public API ----
+  window.ScytheGlobe = {
+    setSelf: function (lat, lon) {
+      clear(selfEntities);
+      if (!isFinite(lat) || !isFinite(lon)) return;
+      selfEntities.push(viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, 500),
+        billboard: {
+          image: IMG.self,
+          width: 28, height: 28,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      }));
+      applyVisibility();
+    },
+
+    setSensors: function (json) {
+      clear(sensorEntities);
+      clear(coverageEntities);
+      if (mode !== 'operator') return; // structural: never in safari
+      parseNodes(json).forEach(function (n) {
+        if (!isFinite(n.lat) || !isFinite(n.lon)) return;
+        sensorEntities.push(viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(n.lon, n.lat, 1000),
+          billboard: { image: IMG.sensor, width: 26, height: 26 },
+          label: label(String(n.label || n.id || ''), LABEL_CYAN)
+        }));
+      });
+      // coverage rings ride with the sensor list
+      this.setCoverage(window.__scytheCoverage || '[]');
+      applyVisibility();
+    },
+
+    setEmitters: function (json) {
+      clear(emitterEntities);
+      if (mode !== 'operator') return; // structural: never in safari
+      parseNodes(json).forEach(function (n) {
+        if (!isFinite(n.lat) || !isFinite(n.lon)) return;
+        emitterEntities.push(viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(n.lon, n.lat, 2000),
+          billboard: { image: IMG.emitter, width: 26, height: 26 },
+          label: label(String(n.label || n.id || ''), LABEL_AMBER)
+        }));
+      });
+      applyVisibility();
+    },
+
+    setCoverage: function (json) {
+      window.__scytheCoverage = (typeof json === 'string') ? json : JSON.stringify(json);
+      clear(coverageEntities);
+      if (mode !== 'operator') return;
+      parseNodes(json).forEach(function (n) {
+        if (!isFinite(n.lat) || !isFinite(n.lon) || !isFinite(n.radiusM)) return;
+        coverageEntities.push(viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(n.lon, n.lat, 0),
+          ellipse: {
+            semiMajorAxis: n.radiusM,
+            semiMinorAxis: n.radiusM,
+            material: Cesium.Color.fromCssColorString('rgba(0, 212, 255, 0.07)'),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString('rgba(0, 212, 255, 0.45)'),
+            outlineWidth: 1.5
+          }
+        }));
+      });
+      applyVisibility();
+    },
+
+    setLayerVisible: function (name, visible) {
+      layerVisible[name] = !!visible;
+      applyVisibility();
+    },
+
+    setMode: function (m) {
+      mode = (m === 'safari') ? 'safari' : 'operator';
+      if (mode !== 'operator') {
+        // Defense in depth: even if native ever pushed nodes, safari shows none.
+        clear(sensorEntities);
+        clear(emitterEntities);
+        clear(coverageEntities);
+      }
+      applyVisibility();
+    },
+
+    flyTo: function (lat, lon, heightM) {
+      if (!isFinite(lat) || !isFinite(lon)) return;
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat, heightM || 1500000),
+        duration: 1.2
+      });
+    }
+  };
+
+  // Signal native that the globe is live.
+  try {
+    if (window.ScytheGlobeBridge && window.ScytheGlobeBridge.onGlobeReady) {
+      window.ScytheGlobeBridge.onGlobeReady();
+    }
+  } catch (e) { /* bridge not attached; native falls back to polling */ }
+  window.__scytheGlobeReady = true;
+})();
+</script>
+</body>
+</html>

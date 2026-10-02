@@ -5,6 +5,8 @@ import android.os.Looper;
 
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -20,26 +22,51 @@ public class ScytheRelayClient {
         void onDisconnected(String reason);
     }
 
-    private final String relayUrl;
+    private final List<String> relayUrls;
     private final Listener listener;
+    private int candidateIndex;
     private final OkHttpClient httpClient;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private WebSocket webSocket;
     private volatile boolean connected;
 
-    public ScytheRelayClient(String relayUrl, Listener listener) {
-        this.relayUrl = relayUrl;
+    public ScytheRelayClient(List<String> relayUrls, Listener listener) {
+        this.relayUrls = new ArrayList<>(relayUrls);
         this.listener = listener;
+        this.candidateIndex = 0;
         this.httpClient = new OkHttpClient.Builder()
             .readTimeout(0, TimeUnit.MILLISECONDS)
             .build();
+    }
+
+    /** Convenience: single URL behaves as a one-candidate list. */
+    public ScytheRelayClient(String relayUrl, Listener listener) {
+        this(java.util.Collections.singletonList(relayUrl), listener);
     }
 
     public synchronized void connect() {
         if (webSocket != null) {
             return;
         }
-        Request request = new Request.Builder().url(relayUrl).build();
+        tryCandidate(candidateIndex);
+    }
+
+    /** Current candidate URL (for status display). */
+    public synchronized String currentUrl() {
+        if (relayUrls == null || relayUrls.isEmpty()) return "";
+        int i = Math.max(0, Math.min(candidateIndex, relayUrls.size() - 1));
+        return relayUrls.get(i);
+    }
+
+    private synchronized void tryCandidate(int index) {
+        if (index < 0 || index >= relayUrls.size()) {
+            return;
+        }
+        candidateIndex = index;
+        String url = relayUrls.get(index);
+        android.util.Log.i("ScytheRelay", "Connecting to relay candidate " + (index + 1)
+            + "/" + relayUrls.size() + ": " + url);
+        Request request = new Request.Builder().url(url).build();
         webSocket = httpClient.newWebSocket(request, new RelaySocketListener());
     }
 
@@ -83,6 +110,15 @@ public class ScytheRelayClient {
 
         @Override
         public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+            synchronized (ScytheRelayClient.this) {
+                if (candidateIndex + 1 < relayUrls.size()) {
+                    // Try the next candidate (e.g. ws:// fallback when wss:// fails).
+                    ScytheRelayClient.this.webSocket = null;
+                    final int next = candidateIndex + 1;
+                    mainHandler.post(() -> tryCandidate(next));
+                    return;
+                }
+            }
             handleDisconnect(t != null ? t.getMessage() : "websocket failure");
         }
 

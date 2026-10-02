@@ -6,6 +6,7 @@ plugins {
 android {
     namespace 'com.rfscythe.commandops'
     compileSdk 36
+    ndkVersion "29.0.14206865"
 
     defaultConfig {
         applicationId "com.rfscythe.commandops"
@@ -13,6 +14,16 @@ android {
         targetSdk 36
         versionCode 2
         versionName "1.2.0"
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags ""
+            }
+        }
     }
 
     buildTypes {
@@ -32,6 +43,12 @@ android {
     kotlinOptions {
         jvmTarget = '11'
     }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+        }
+    }
 }
 
 dependencies {
@@ -43,4 +60,40 @@ dependencies {
     implementation 'androidx.core:core:1.13.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'io.github.sceneview:arsceneview:2.3.1'
+    implementation 'androidx.webkit:webkit:1.10.0'
 }
+
+// ---- CesiumJS 1.114 vendoring (offline 3D globe) ----
+// Downloads the Cesium build + assets once into src/main/assets/cesium/
+// (gitignored). The APK stays fully offline-capable: no CDN at runtime.
+def cesiumDir = file("src/main/assets/cesium")
+def cesiumJs = new File(cesiumDir, "Cesium.js")
+tasks.register("downloadCesium") {
+    doLast {
+        if (cesiumJs.exists()) {
+            println("Cesium 1.114 already vendored, skipping download.")
+            return
+        }
+        cesiumDir.mkdirs()
+        def tmpZip = new File(buildDir, "cesium-1.114.zip")
+        println("Downloading CesiumJS 1.114...")
+        new URL("https://github.com/CesiumGS/cesium/releases/download/1.114/Cesium-1.114.zip").withInputStream { i ->
+            tmpZip.withOutputStream { it << i }
+        }
+        println("Extracting Cesium build (Cesium.js + Widgets + Assets, no Workers)...")
+        copy {
+            from(zipTree(tmpZip)) {
+                include "Build/Cesium/Cesium.js"
+                include "Build/Cesium/Widgets/**"
+                include "Build/Cesium/Assets/**"
+                exclude "Build/Cesium/Workers/**"
+            }
+            into cesiumDir
+            eachFile { details -> details.path = details.path.replaceFirst("Build/Cesium/", "") }
+            includeEmptyDirs = false
+        }
+        tmpZip.delete()
+        println("Cesium 1.114 vendored at ${cesiumDir}")
+    }
+}
+tasks.named("preBuild").configure { dependsOn("downloadCesium") }

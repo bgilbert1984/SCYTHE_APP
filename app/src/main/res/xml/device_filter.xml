@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- USB device filter for the NESDR SMArt series.
+     Android wants DECIMAL vendor/product ids here:
+       0x0bda = 3034, 0x2838 = 10360 (SMArt v5), 0x2832 = 10290 (SMArt) -->
+<resources>
+    <usb-device vendor-id="3034" product-id="10360" />
+    <usb-device vendor-id="3034" product-id="10290" />
+</resources>
