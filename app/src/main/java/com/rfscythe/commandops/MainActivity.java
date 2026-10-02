@@ -95,6 +95,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvSdrStart;
     private TextView tvSdrStop;
     private RfSdrManager sdrManager;
+    private RfSpectrumReporter spectrumReporter;
+    private String sdrLine1;
+    private String sdrLine2;
+    private String reporterStatus;
 
     // Layer rail buttons
     private TextView btnLayerRf, btnLayerAir, btnLayerSpace, btnLayerSea, btnLayerCov;
@@ -120,6 +124,14 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context ctx, Intent intent) {
             boolean running = intent.getBooleanExtra(ScytheSensorService.EXTRA_RUNNING, false);
+            // Phase 1: the spectrum reporter only uplinks while the service
+            // is alive AND its relay is connected. Placed before the early
+            // return so a service stop clears the flag.
+            boolean relayConnectedEarly = running && intent.getBooleanExtra(
+                    ScytheSensorService.EXTRA_RELAY_CONNECTED, false);
+            if (spectrumReporter != null) {
+                spectrumReporter.setRelayUp(relayConnectedEarly);
+            }
             if (!running) {
                 sensorBar.setVisibility(View.GONE);
                 return;
@@ -156,6 +168,35 @@ public class MainActivity extends AppCompatActivity {
             tvSensorMeta.setText(relaySummary);
         }
     };
+
+    /** Phase 1: merges the spectrum reporter's status into the SDR bar. */
+    private final BroadcastReceiver reporterStatusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
+            reporterStatus = intent.getStringExtra(RfSpectrumReporter.EXTRA_STATUS);
+            runOnUiThread(() -> renderSdrBar());
+        }
+    };
+
+    /**
+     * Phase 1: renders the SDR bar, merging the spectrum reporter's status
+     * ("spectrum reporting every 30s — floor … dB") into the meta line while
+     * streaming. The manual start/stop buttons are untouched.
+     */
+    private void renderSdrBar() {
+        if (sdrLine1 == null) {
+            sdrBar.setVisibility(View.GONE);
+            return;
+        }
+        sdrBar.setVisibility(View.VISIBLE);
+        tvSdrStatus.setText(sdrLine1);
+        String meta = sdrLine2 != null ? sdrLine2 : "";
+        if (reporterStatus != null && !reporterStatus.isEmpty()
+                && sdrManager != null && sdrManager.isStreaming()) {
+            meta = meta.isEmpty() ? reporterStatus : meta + "\n" + reporterStatus;
+        }
+        tvSdrMeta.setText(meta);
+    }
 
     private final LocationListener locationListener = new LocationListener() {
         @Override public void onLocationChanged(Location loc) {
@@ -290,16 +331,16 @@ public class MainActivity extends AppCompatActivity {
         tvSdrStop.setOnClickListener(v -> { if (sdrManager != null) sdrManager.userStop(); });
         sdrManager = new RfSdrManager(this);
         sdrManager.setListener((line1, line2) -> runOnUiThread(() -> {
-            if (line1 == null) {
-                sdrBar.setVisibility(View.GONE);
-                return;
-            }
-            sdrBar.setVisibility(View.VISIBLE);
-            tvSdrStatus.setText(line1);
-            tvSdrMeta.setText(line2 != null ? line2 : "");
+            sdrLine1 = line1;
+            sdrLine2 = line2;
+            renderSdrBar();
         }));
         sdrManager.start();
         sdrManager.handleIntent(getIntent());
+
+        // ---- Phase 1: spectrum reporter (duty-cycled; inert without a dongle) ----
+        spectrumReporter = new RfSpectrumReporter(this, sdrManager);
+        spectrumReporter.start();
 
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         requestRuntimePermissions();
@@ -589,6 +630,9 @@ public class MainActivity extends AppCompatActivity {
         if (globeView != null) globeView.onResume();
         LocalBroadcastManager.getInstance(this).registerReceiver(
             sensorReceiver, new IntentFilter(ScytheSensorService.ACTION_STATUS));
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+            reporterStatusReceiver,
+            new IntentFilter(RfSpectrumReporter.ACTION_REPORTER_STATUS));
         String newUrl = ScytheConfig.getServerUrl(this);
         if (!newUrl.equals(serverUrl)) {
             serverUrl = newUrl;
@@ -603,6 +647,9 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         if (globeView != null) globeView.onPause();
         LocalBroadcastManager.getInstance(this).unregisterReceiver(sensorReceiver);
+        try {
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(reporterStatusReceiver);
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -613,6 +660,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         stopLocation();
+        if (spectrumReporter != null) spectrumReporter.stop();
         if (sdrManager != null) sdrManager.stop();
         if (globeView != null) globeView.destroy();
         super.onDestroy();

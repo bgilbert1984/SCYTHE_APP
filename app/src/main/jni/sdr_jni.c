@@ -18,12 +18,14 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 
 #include "rtl-sdr.h"
+#include "sdr_dsp.h"
 
 #define LOG_TAG "ScytheSdr"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -37,6 +39,11 @@
 /* Ring buffer between the async callback and Java polling. */
 #define RING_CAP (4u * 1024u * 1024u)
 
+/* Phase 1 spectrum tap: overwrite-oldest ring fed by the same async
+ * callback. Holds ~0.5 s; the reporter drains DSP_NEED_BYTES (1 MB)
+ * without contending with the poll thread's primary drain. */
+#define SPEC_RING_CAP (2u * 1024u * 1024u)
+
 typedef struct {
     rtlsdr_dev_t *dev;
     pthread_t thread;
@@ -48,6 +55,14 @@ typedef struct {
     uint64_t total_bytes; /* bytes ever delivered to the ring */
     uint64_t dropped;     /* bytes dropped on ring overflow */
     pthread_mutex_t lock;
+    /* Phase 1: spectrum tap ring + DSP state. */
+    uint8_t *spec_ring;
+    size_t spec_head;
+    size_t spec_tail;
+    size_t spec_avail;
+    dsp_ctx_t *dsp;       /* lazy: kiss cfg + Hann table */
+    float last_floor_db;
+    uint32_t center_hz;
 } sdr_t;
 
 static sdr_t *handle_of(jlong h) {
@@ -73,6 +88,27 @@ static void sdr_async_cb(unsigned char *buf, uint32_t len, void *ctx) {
     s->head = (s->head + n) % RING_CAP;
     s->avail += n;
     s->total_bytes += n;
+
+    /* Phase 1 spectrum tap: overwrite-oldest, always takes the full len. */
+    if (s->spec_ring) {
+        size_t m = len;
+        if (m > SPEC_RING_CAP)
+            m = SPEC_RING_CAP;
+        const unsigned char *src = buf + (len - m);
+        size_t sfirst = SPEC_RING_CAP - s->spec_head;
+        if (sfirst > m)
+            sfirst = m;
+        memcpy(s->spec_ring + s->spec_head, src, sfirst);
+        memcpy(s->spec_ring, src + sfirst, m - sfirst);
+        s->spec_head = (s->spec_head + m) % SPEC_RING_CAP;
+        if (s->spec_avail + m > SPEC_RING_CAP) {
+            size_t over = s->spec_avail + m - SPEC_RING_CAP;
+            s->spec_tail = (s->spec_tail + over) % SPEC_RING_CAP;
+            s->spec_avail = SPEC_RING_CAP;
+        } else {
+            s->spec_avail += m;
+        }
+    }
     pthread_mutex_unlock(&s->lock);
 }
 
@@ -92,6 +128,8 @@ static void sdr_destroy(sdr_t *s) {
         return;
     pthread_mutex_destroy(&s->lock);
     free(s->ring);
+    free(s->spec_ring);
+    dsp_destroy(s->dsp);
     free(s);
 }
 
@@ -116,7 +154,14 @@ Java_com_rfscythe_commandops_SdrNative_sdrOpen(JNIEnv *env, jclass cls, jint fd)
         free(s);
         return 0;
     }
+    s->spec_ring = (uint8_t *)malloc(SPEC_RING_CAP);
+    if (!s->spec_ring) {
+        free(s->ring);
+        free(s);
+        return 0;
+    }
     pthread_mutex_init(&s->lock, NULL);
+    s->center_hz = PHASE0_CENTER_HZ;
 
     int r = rtlsdr_open_fd(&s->dev, fd);
     if (r < 0 || !s->dev) {
@@ -191,8 +236,12 @@ Java_com_rfscythe_commandops_SdrNative_sdrSetCenterFreq(JNIEnv *env, jclass cls,
     if (!s)
         return -1;
     int r = rtlsdr_set_center_freq(s->dev, (uint32_t)hz);
-    if (r == 0)
+    if (r == 0) {
         rtlsdr_reset_buffer(s->dev); /* flush stale post-retune */
+        pthread_mutex_lock(&s->lock);
+        s->center_hz = (uint32_t)hz;
+        pthread_mutex_unlock(&s->lock);
+    }
     return r;
 }
 
@@ -332,4 +381,120 @@ Java_com_rfscythe_commandops_SdrNative_sdrGetTunerType(JNIEnv *env, jclass cls, 
     if (!s || !s->dev)
         return -1;
     return (jint)rtlsdr_get_tuner_type(s->dev);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 1: edge DSP — spectrum reporter.                              */
+/*                                                                     */
+/* The reporter drains DSP_NEED_BYTES (8 x 65536 I/Q samples, ~256 ms) */
+/* from the dedicated spectrum tap ring (no contention with the poll    */
+/* thread) and runs the Hann periodogram natively. Java only ever sees  */
+/* the 256 quantized bytes + the median floor. Raw I/Q never crosses    */
+/* the JNI boundary for reporting.                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Returns 1 when the spectrum tap holds enough data for a report,
+ * 0 otherwise.
+ */
+JNIEXPORT jint JNICALL
+Java_com_rfscythe_commandops_SdrNative_sdrSpectrumReady(JNIEnv *env, jclass cls,
+                                                        jlong h) {
+    (void)env; (void)cls;
+    sdr_t *s = handle_of(h);
+    if (!s)
+        return 0;
+    pthread_mutex_lock(&s->lock);
+    int ready = s->spec_avail >= DSP_NEED_BYTES;
+    pthread_mutex_unlock(&s->lock);
+    return ready;
+}
+
+/*
+ * Drains one report's worth of I/Q from the spectrum tap and computes the
+ * 256-bin thumbnail into a direct ByteBuffer (must have capacity >= 256).
+ * Returns 0 on success, -1 on bad handle/buffer, -2 when not enough data
+ * is buffered yet.
+ *
+ * The FFT runs WITHOUT the ring lock held. The Java caller
+ * (RfSdrManager.computeSpectrum) holds its own stateLock for the whole
+ * call, so teardown cannot free the handle mid-compute.
+ */
+JNIEXPORT jint JNICALL
+Java_com_rfscythe_commandops_SdrNative_sdrComputeSpectrum(JNIEnv *env, jclass cls,
+                                                          jlong h, jobject dst) {
+    (void)cls;
+    sdr_t *s = handle_of(h);
+    if (!s || !dst)
+        return -1;
+
+    uint8_t *out = (*env)->GetDirectBufferAddress(env, dst);
+    jlong cap = (*env)->GetDirectBufferCapacity(env, dst);
+    if (!out || cap < DSP_THUMB_BINS)
+        return -1;
+
+    uint8_t *raw = (uint8_t *)malloc(DSP_NEED_BYTES);
+    if (!raw)
+        return -1;
+
+    pthread_mutex_lock(&s->lock);
+    if (s->spec_avail < DSP_NEED_BYTES) {
+        pthread_mutex_unlock(&s->lock);
+        free(raw);
+        return -2;
+    }
+    size_t first = SPEC_RING_CAP - s->spec_tail;
+    if (first > DSP_NEED_BYTES)
+        first = DSP_NEED_BYTES;
+    memcpy(raw, s->spec_ring + s->spec_tail, first);
+    memcpy(raw + first, s->spec_ring, DSP_NEED_BYTES - first);
+    s->spec_tail = (s->spec_tail + DSP_NEED_BYTES) % SPEC_RING_CAP;
+    s->spec_avail -= DSP_NEED_BYTES;
+    if (!s->dsp)
+        s->dsp = dsp_create(); /* lazy: kiss cfg + Hann table */
+    dsp_ctx_t *dsp = s->dsp;
+    pthread_mutex_unlock(&s->lock);
+
+    if (!dsp) {
+        free(raw);
+        return -1;
+    }
+    float floor_db = 0.0f;
+    int rc = dsp_compute_spectrum(dsp, raw, DSP_NEED_BYTES, out, &floor_db);
+    free(raw);
+    if (rc != 0)
+        return -1;
+
+    pthread_mutex_lock(&s->lock);
+    s->last_floor_db = floor_db;
+    pthread_mutex_unlock(&s->lock);
+    return 0;
+}
+
+/* Median floor (dB) from the most recent successful sdrComputeSpectrum. */
+JNIEXPORT jfloat JNICALL
+Java_com_rfscythe_commandops_SdrNative_sdrGetFloorDb(JNIEnv *env, jclass cls,
+                                                     jlong h) {
+    (void)env; (void)cls;
+    sdr_t *s = handle_of(h);
+    if (!s)
+        return nanf("");
+    pthread_mutex_lock(&s->lock);
+    float f = s->last_floor_db;
+    pthread_mutex_unlock(&s->lock);
+    return (jfloat)f;
+}
+
+/* Last successfully tuned centre frequency, Hz (-1 on bad handle). */
+JNIEXPORT jlong JNICALL
+Java_com_rfscythe_commandops_SdrNative_sdrGetCenterFreq(JNIEnv *env, jclass cls,
+                                                        jlong h) {
+    (void)env; (void)cls;
+    sdr_t *s = handle_of(h);
+    if (!s)
+        return -1;
+    pthread_mutex_lock(&s->lock);
+    uint32_t hz = s->center_hz;
+    pthread_mutex_unlock(&s->lock);
+    return (jlong)hz;
 }
