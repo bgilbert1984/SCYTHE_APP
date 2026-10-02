@@ -32,6 +32,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.Base64;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
@@ -105,6 +106,12 @@ public class ScytheSensorService extends Service {
     private BluetoothLeScanner bluetoothLeScanner;
     private ConnectivityManager connectivityManager;
     private BroadcastReceiver wifiScanReceiver;
+    /**
+     * Phase 1: spectrum thumbnails from RfSpectrumReporter (local broadcast).
+     * Re-emitted as "android_rf_spectrum" events on the existing relay
+     * connection -- raw I/Q never leaves the phone.
+     */
+    private BroadcastReceiver spectrumReceiver;
     private ScytheRelayClient relayClient;
     private boolean bluetoothScanActive;
     private final Map<String, ObservedBluetoothDevice> bluetoothObservations = new HashMap<>();
@@ -174,6 +181,13 @@ public class ScytheSensorService extends Service {
             deviceId = "unknown-device";
         }
         callsign = "ANDROID-" + deviceId.substring(0, Math.min(deviceId.length(), 6)).toUpperCase(Locale.US);
+        spectrumReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context ctx, Intent intent) {
+                handleSpectrumReady(intent);
+            }
+        };
+        LocalBroadcastManager.getInstance(this).registerReceiver(spectrumReceiver,
+                new IntentFilter(RfSpectrumReporter.ACTION_SPECTRUM_READY));
     }
 
     @Override
@@ -214,6 +228,10 @@ public class ScytheSensorService extends Service {
         try { locationManager.removeUpdates(locationListener); } catch (Exception ignored) {}
         if (wifiScanReceiver != null) {
             try { unregisterReceiver(wifiScanReceiver); } catch (Exception ignored) {}
+        }
+        if (spectrumReceiver != null) {
+            try { LocalBroadcastManager.getInstance(this).unregisterReceiver(spectrumReceiver); }
+            catch (Exception ignored) {}
         }
         Intent i = new Intent(ACTION_STATUS);
         i.putExtra(EXTRA_RUNNING, false);
@@ -613,6 +631,72 @@ public class ScytheSensorService extends Service {
             startRelayClient();
         } else if (!relayClient.isConnected()) {
             relayClient.connect();
+        }
+    }
+
+    /**
+     * Phase 1: turns a reporter thumbnail into an "android_rf_spectrum"
+     * event and uplinks it over the EXISTING relay connection. No second
+     * socket, no raw I/Q -- just 256 quantized bytes + the median floor.
+     * source "android_rtlsdr" marks it EXTERNAL for the backend.
+     * Runs on the main thread (LocalBroadcastManager delivery).
+     */
+    private void handleSpectrumReady(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String thumbB64 = intent.getStringExtra(RfSpectrumReporter.EXTRA_THUMB_B64);
+        float floorDb = intent.getFloatExtra(RfSpectrumReporter.EXTRA_FLOOR_DB, Float.NaN);
+        long centerHz = intent.getLongExtra(RfSpectrumReporter.EXTRA_CENTER_HZ, 100000000L);
+        long tsMs = intent.getLongExtra(RfSpectrumReporter.EXTRA_TIMESTAMP_MS,
+                System.currentTimeMillis());
+        if (thumbB64 == null || thumbB64.isEmpty() || Float.isNaN(floorDb)) {
+            Log.w(TAG, "dropping spectrum report: missing thumb/floor");
+            return;
+        }
+        // Validate the thumbnail really is 256 bytes before uplinking.
+        byte[] thumb;
+        try {
+            thumb = Base64.decode(thumbB64, Base64.NO_WRAP);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "dropping spectrum report: bad base64", e);
+            return;
+        }
+        if (thumb.length != 256) {
+            Log.w(TAG, "dropping spectrum report: thumb len=" + thumb.length);
+            return;
+        }
+
+        try {
+            JSONObject receiver = new JSONObject()
+                    .put("product", "NESDR SMArt v5")
+                    .put("center_hz", centerHz)
+                    .put("sample_rate_hz", 2048000)
+                    .put("gain_db", 40.0);
+
+            JSONObject event = new JSONObject()
+                    .put("type", "android_rf_spectrum")
+                    .put("source", "android_rtlsdr")
+                    .put("observer_id", "android-" + deviceId)
+                    .put("platform", "android")
+                    .put("callsign", callsign)
+                    .put("timestamp", tsMs / 1000.0)
+                    .put("sensor_context", buildSensorContext())
+                    .put("receiver", receiver)
+                    .put("floor_db", (double) floorDb)
+                    .put("db_min", -90)
+                    .put("db_max", 0)
+                    .put("spectrum_thumb", thumbB64);
+            if (lastLocation != null) {
+                event.put("lat", lastLocation.getLatitude());
+                event.put("lon", lastLocation.getLongitude());
+            }
+
+            sendRelayEvent(event);
+            Log.i(TAG, "uplinked android_rf_spectrum: center=" + centerHz
+                    + "Hz floor=" + floorDb + "dB");
+        } catch (Exception e) {
+            Log.w(TAG, "failed to build spectrum event: " + e.getMessage());
         }
     }
 

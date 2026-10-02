@@ -190,6 +190,53 @@ public class RfSdrManager {
         }
     }
 
+    /** True while the native stream thread is up. */
+    public boolean isStreaming() {
+        synchronized (stateLock) {
+            return streaming;
+        }
+    }
+
+    /** Last successfully tuned centre frequency in Hz (100 MHz default). */
+    public long getCenterFreqHz() {
+        synchronized (stateLock) {
+            if (nativeHandle == 0) {
+                return 100000000L;
+            }
+            long hz = SdrNative.sdrGetCenterFreq(nativeHandle);
+            return hz > 0 ? hz : 100000000L;
+        }
+    }
+
+    /**
+     * Phase 1: compute a 256-bin spectrum thumbnail natively (Hann,
+     * 8x64k FFT, averaged). The destination must be a direct ByteBuffer
+     * with capacity >= 256. Returns 0 ok, -1 no handle/not streaming,
+     * -2 not enough data buffered yet.
+     *
+     * Holds stateLock for the whole native call so teardown cannot free
+     * the handle mid-compute (the FFT runs without the native ring lock
+     * held, so the stream thread is never blocked).
+     */
+    public int computeSpectrum(java.nio.ByteBuffer out256) {
+        synchronized (stateLock) {
+            if (nativeHandle == 0 || !streaming) {
+                return -1;
+            }
+            return SdrNative.sdrComputeSpectrum(nativeHandle, out256);
+        }
+    }
+
+    /** Median floor (dB) from the last successful computeSpectrum(). */
+    public float getSpectrumFloorDb() {
+        synchronized (stateLock) {
+            if (nativeHandle == 0) {
+                return Float.NaN;
+            }
+            return SdrNative.sdrGetFloorDb(nativeHandle);
+        }
+    }
+
     // ---- internals, all called with stateLock held unless noted ----
 
     private boolean isDongle(UsbDevice dev) {

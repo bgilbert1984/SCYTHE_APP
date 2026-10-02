@@ -60,4 +60,22 @@ final class SdrNative {
 
     /** rtlsdr_tuner enum value, or -1. */
     static native int sdrGetTunerType(long handle);
+
+    // ---- Phase 1: edge DSP (spectrum reporter) ----
+
+    /** 1 when the spectrum tap holds a full report's worth of I/Q, else 0. */
+    static native int sdrSpectrumReady(long handle);
+
+    /**
+     * Computes the 256-bin spectrum thumbnail natively into a direct
+     * ByteBuffer (capacity >= 256). Returns 0 ok, -1 bad handle/buffer,
+     * -2 not enough data buffered yet.
+     */
+    static native int sdrComputeSpectrum(long handle, java.nio.ByteBuffer out256);
+
+    /** Median floor (dB) from the last successful sdrComputeSpectrum. */
+    static native float sdrGetFloorDb(long handle);
+
+    /** Last successfully tuned centre frequency in Hz, or -1. */
+    static native long sdrGetCenterFreq(long handle);
 }
